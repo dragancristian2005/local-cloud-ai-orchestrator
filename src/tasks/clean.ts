@@ -17,7 +17,11 @@ export function cleanModelOutput(raw: string): string {
 
   if (!text.includes("\n") && text.length >= 2) {
     const closing = QUOTE_PAIRS[text[0] as string];
-    if (closing !== undefined && text.endsWith(closing)) text = text.slice(1, -1).trim();
+    const inner = text.slice(1, -1);
+    // Only a single pair of quotes is wrapping. A doubled or tripled quote is part of the answer
+    // itself: a Python docstring starts and ends with """.
+    const isWrapped = closing !== undefined && text.endsWith(closing) && !inner.startsWith(text[0]!) && !inner.endsWith(closing);
+    if (isWrapped) text = inner.trim();
   }
   return text;
 }

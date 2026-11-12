@@ -54,6 +54,12 @@ test("normalize unwraps a fenced comment", () => {
   assert.equal(tsTask.normalize("```ts\n/**\n * Clamp.\n */\n```"), "/**\n * Clamp.\n */");
 });
 
+test("normalize keeps a one-line Python docstring intact", () => {
+  const answer = '"""Slugify a title."""';
+  assert.equal(pyTask.normalize(answer), answer);
+  assert.equal(pyTask.verify!(pyTask.normalize(answer)).status, "pass");
+});
+
 test("prepare needs a file and a symbol", () => {
   assert.throws(() => docstring.prepare({ text: TS_SOURCE }, 6000), InputError);
 });
