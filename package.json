@@ -1,0 +1,22 @@
+{
+  "name": "tiered-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runs coding tasks on a local Ollama model first and escalates to the claude CLI only when verification fails.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "orch": "src/cli.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "orch": "node src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2"
+  }
+}

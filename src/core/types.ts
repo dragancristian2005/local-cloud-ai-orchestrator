@@ -1,0 +1,98 @@
+export type FallbackReason = "pc_unreachable" | "timeout" | "verify_failed" | "backend_error";
+export type VerifyStatus = "pass" | "fail" | "skipped";
+
+export interface VerifyResult {
+  status: "pass" | "fail";
+  detail: string;
+}
+
+export interface BackendRequest {
+  prompt: string;
+  timeoutMs: number;
+  cwd?: string;
+}
+
+export interface BackendResult {
+  text: string;
+  durationMs: number;
+  promptTokens?: number;
+  outputTokens?: number;
+  model?: string;
+}
+
+export interface Backend {
+  /** Config key, e.g. "pc-ollama". */
+  id: string;
+  /** "ollama:qwen2.5-coder:7b" | "claude-cli" */
+  name: string;
+  kind: "local" | "cloud";
+  model: string;
+  timeoutMs: number;
+  healthCheck(): Promise<boolean>;
+  run(req: BackendRequest): Promise<BackendResult>;
+}
+
+/** A backend call failed for a reason that is not the model's answer quality. */
+export class BackendError extends Error {
+  reason: Exclude<FallbackReason, "verify_failed">;
+
+  constructor(reason: Exclude<FallbackReason, "verify_failed">, message: string) {
+    super(message);
+    this.name = "BackendError";
+    this.reason = reason;
+  }
+}
+
+/** Bad input from the user or the repo (nothing staged, symbol missing). Exit code 2. */
+export class InputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InputError";
+  }
+}
+
+/** Bad or missing configuration. Exit code 2. */
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfigError";
+  }
+}
+
+export interface TaskInput {
+  /** The diff (commit-message) or the source file content (docstring, test-stub). */
+  text: string;
+  stat?: string;
+  filePath?: string;
+  symbol?: string;
+}
+
+export interface PreparedTask {
+  taskType: string;
+  prompt: string;
+  normalize(raw: string): string;
+  /** Absent = verifier kind "none": the attempt is logged as "skipped" and accepted. */
+  verify?(output: string): VerifyResult;
+}
+
+export interface AttemptRecord {
+  runId: string;
+  ts: string;
+  repo: string | null;
+  taskType: string;
+  tier: number;
+  /** 0 = first try at this tier, 1 = retry. */
+  attempt: number;
+  backend: string;
+  model: string;
+  durationMs: number;
+  promptTokens: number | null;
+  outputTokens: number | null;
+  verify: VerifyStatus;
+  verifyDetail: string;
+  escalated: boolean;
+  fallbackReason: FallbackReason | null;
+  outputFile: string | null;
+  mode: "run" | "eval";
+  taskId: string | null;
+}

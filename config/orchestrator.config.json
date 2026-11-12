@@ -1,0 +1,7 @@
+{
+  "backends": {
+    "pc-ollama": { "type": "ollama", "baseUrl": "http://PC_ADDRESS:11434", "model": "qwen2.5-coder:7b", "timeoutMs": 120000 }
+  },
+  "chains": { "commit-message": ["pc-ollama"] },
+  "retryBeforeEscalate": 1
+}
