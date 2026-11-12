@@ -1,3 +1,4 @@
+import { estimateTokens, fitDiff } from "../core/context.ts";
 import { maxLines, noCodeFence, nonEmpty, runChecks } from "../core/verifier.ts";
 import type { Check } from "../core/verifier.ts";
 import type { PreparedTask, TaskInput } from "../core/types.ts";
@@ -67,10 +68,14 @@ function normalize(raw: string): string {
 
 export const commitMessage: TaskModule = {
   type: "commit-message",
-  prepare(input: TaskInput, _budgetTokens: number): PreparedTask {
+  prepare(input: TaskInput, budgetTokens: number): PreparedTask {
+    const stat = input.stat ?? "";
+    // What the template and the stat use is not available to the diff; 2 tokens cover rounding.
+    const diffBudget = Math.max(0, budgetTokens - estimateTokens(TEMPLATE) - estimateTokens(stat) - 2);
+    const diff = fitDiff(input.text, diffBudget);
     return {
       taskType: "commit-message",
-      prompt: TEMPLATE.replace("{stat}", () => input.stat ?? "").replace("{diff}", () => input.text),
+      prompt: TEMPLATE.replace("{stat}", () => stat).replace("{diff}", () => diff),
       normalize,
       verify: (output) => runChecks(output, checks),
     };
