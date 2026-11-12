@@ -134,7 +134,8 @@ async function evalCommand(args: string[]): Promise<number> {
       onProgress: (line) => process.stderr.write(line + "\n"),
     });
     process.stdout.write(formatEvalTable(results));
-    return results.at(-1)?.reason === "pc_unreachable" ? 1 : 0;
+    const lastReason = results.at(-1)?.reason;
+    return lastReason === "pc_unreachable" || lastReason === "backend_error" ? 1 : 0;
   } catch (err) {
     if (err instanceof BackendError) {
       process.stderr.write(`orch: ${err.message}\n`);

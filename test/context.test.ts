@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collectInput, estimateTokens, fitDiff, fitSource } from "../src/core/context.ts";
+import { collectInput, estimateTokens, fitDiff, fitSource, fitStat } from "../src/core/context.ts";
 import { InputError } from "../src/core/types.ts";
 import { commitMessage } from "../src/tasks/commit-message.ts";
 import { makeTempDir, makeTempRepo } from "./helpers/temp-repo.ts";
@@ -17,10 +17,55 @@ function fileDiff(name: string, addedLines: number): string {
   return lines.join("\n") + "\n";
 }
 
-test("estimateTokens is a quarter of the length, rounded up", () => {
-  assert.equal(estimateTokens("abcdefgh"), 2);
-  assert.equal(estimateTokens("abcdefghi"), 3);
+test("estimateTokens is a third of the length, rounded up", () => {
+  // Deliberately pessimistic: lockfiles and JSON run at about 2.5 characters per token.
+  assert.equal(estimateTokens("abcdef"), 2);
+  assert.equal(estimateTokens("abcdefg"), 3);
   assert.equal(estimateTokens(""), 0);
+});
+
+function manyFilesDiff(count: number): string {
+  let diff = "";
+  for (let i = 0; i < count; i++) diff += fileDiff(`src/generated/file-${i}.ts`, 3);
+  return diff;
+}
+
+function manyFilesStat(count: number): string {
+  const lines: string[] = [];
+  for (let i = 0; i < count; i++) lines.push(` src/generated/file-${i}.ts | 3 +++`);
+  lines.push(` ${count} files changed, ${count * 3} insertions(+)`);
+  return lines.join("\n") + "\n";
+}
+
+test("fitDiff stays in budget when the file headers alone do not fit", () => {
+  const fitted = fitDiff(manyFilesDiff(2000), 1000);
+  assert.ok(estimateTokens(fitted) <= 1000, `got ${estimateTokens(fitted)} tokens`);
+  assert.ok(fitted.includes("diff --git a/src/generated/file-0.ts b/src/generated/file-0.ts"));
+  assert.match(fitted, /\[\.\.\. \d+ more files not shown \.\.\.\]/);
+});
+
+test("fitDiff stays in budget with 150 files", () => {
+  const fitted = fitDiff(manyFilesDiff(150), 1000);
+  assert.ok(estimateTokens(fitted) <= 1000, `got ${estimateTokens(fitted)} tokens`);
+});
+
+test("fitStat keeps the summary line and says how many files it left out", () => {
+  const fitted = fitStat(manyFilesStat(500), 200);
+  assert.ok(estimateTokens(fitted) <= 200, `got ${estimateTokens(fitted)} tokens`);
+  assert.ok(fitted.includes("500 files changed, 1500 insertions(+)"));
+  assert.ok(fitted.includes("src/generated/file-0.ts"));
+  assert.match(fitted, /\[\.\.\. \d+ more files \.\.\.\]/);
+});
+
+test("fitStat leaves a short stat alone", () => {
+  const stat = manyFilesStat(3);
+  assert.equal(fitStat(stat, 200), stat);
+});
+
+test("commit-message prompt stays in budget with 2000 staged files", () => {
+  const task = commitMessage.prepare({ text: manyFilesDiff(2000), stat: manyFilesStat(2000) }, 6000);
+  assert.ok(estimateTokens(task.prompt) <= 6000, `got ${estimateTokens(task.prompt)} tokens`);
+  assert.ok(task.prompt.includes("2000 files changed"));
 });
 
 test("fitDiff leaves a small diff alone", () => {

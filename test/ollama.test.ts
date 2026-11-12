@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { OllamaBackend } from "../src/backends/ollama.ts";
 import { createBackend } from "../src/backends/backend.ts";
 import type { OllamaBackendConfig } from "../src/core/config.ts";
-import { BackendError } from "../src/core/types.ts";
+import { BackendError, ConfigError } from "../src/core/types.ts";
 import { closedPortUrl, json, startFakeOllama } from "./helpers/fake-ollama.ts";
 
 function cfg(baseUrl: string, over: Partial<OllamaBackendConfig> = {}): OllamaBackendConfig {
@@ -121,6 +121,28 @@ test("empty content is a backend error", async () => {
   } finally {
     await server.close();
   }
+});
+
+test("a prompt that filled the context window is a backend error", async () => {
+  const server = await startFakeOllama((_req, _body, res) =>
+    json(res, 200, { message: { content: "Add helper" }, prompt_eval_count: 8192, eval_count: 3 }),
+  );
+  try {
+    const backend = new OllamaBackend("pc", cfg(server.url));
+    await assert.rejects(
+      backend.run({ prompt: "x", timeoutMs: 2000 }),
+      (err: unknown) => err instanceof BackendError && err.reason === "backend_error" && /truncated/.test(err.message),
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("createBackend refuses the PC_ADDRESS placeholder", () => {
+  assert.throws(
+    () => createBackend("pc-ollama", cfg("http://PC_ADDRESS:11434")),
+    (err: unknown) => err instanceof ConfigError && /PC_ADDRESS/.test(err.message),
+  );
 });
 
 test("createBackend builds an Ollama backend and applies a model override", () => {

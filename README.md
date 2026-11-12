@@ -29,7 +29,7 @@ orch run --type test-stub --file src/math.ts --symbol clamp
 
 # Run the 12 fixed tasks against the local model, then compare models.
 orch eval --backend pc-ollama
-orch eval --backend pc-ollama --model qwen3.5:9b
+orch eval --backend pc-ollama --model <another-model>
 orch report --mode eval
 ```
 
@@ -45,7 +45,7 @@ Exit codes: `0` success, `1` every tier failed, `2` bad usage, config or input.
 ## How a run works
 
 1. The task builds a prompt from the repository (the staged diff, or a window of the source file),
-   trimmed to about 6000 tokens.
+   trimmed to a budget of 6000 tokens (estimated pessimistically, at 3 characters per token).
 2. Each backend in the task's chain is tried in order. A local backend that is off or asleep is
    skipped after 3 seconds.
 3. The answer is cleaned (reasoning blocks, code fences) and checked against the task's rules.
@@ -80,10 +80,15 @@ To try another model, pass `--model <name>` for one run, or change `model` in th
 | avg s | average time per attempt |
 | pc down | attempts skipped because the PC was off or asleep; not counted anywhere else |
 
+What you stage, or the file you name, is sent to the model: to your PC, and to Claude when a run
+escalates. Do not stage secrets.
+
 ## Rules this project keeps
 
 - The Claude backend only starts the unmodified `claude` binary. It never reads or forwards
   credentials. Its flags are listed in [docs/claude-cli-flags.md](docs/claude-cli-flags.md).
+- The Claude tier refuses to run while `ANTHROPIC_API_KEY` (or another variable that would bill
+  an API key or reroute the call) is set, so an escalation can never cost money.
 - Claude calls run one at a time, and `orch eval` refuses cloud backends.
 - Ollama is never exposed to the internet.
 - `orch` only reads your repositories. It never writes, commits or changes branches.

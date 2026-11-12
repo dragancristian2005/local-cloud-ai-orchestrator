@@ -22,5 +22,8 @@ test("stagedDiff works with a space in the repo path", async () => {
 });
 
 test("stagedDiff rejects a directory that is not a repository", async () => {
-  await assert.rejects(stagedDiff(makeTempDir()), InputError);
+  await assert.rejects(
+    stagedDiff(makeTempDir()),
+    (err: unknown) => err instanceof InputError && /not a git repository/.test(err.message),
+  );
 });

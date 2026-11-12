@@ -5,9 +5,11 @@ import { stagedDiff } from "../workspace/git.ts";
 import { InputError } from "./types.ts";
 import type { TaskInput } from "./types.ts";
 
-const CHARS_PER_TOKEN = 4;
+// Deliberately pessimistic. Prose and code run at about 4 characters per token, but lockfiles and
+// JSON run at about 2.5, and an under-count means Ollama silently cuts the prompt.
+const CHARS_PER_TOKEN = 3;
 
-/** A rough token count (4 characters per token). Good enough to keep a prompt inside the context window. */
+/** A rough token count (3 characters per token), used to keep a prompt inside the context window. */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
@@ -32,30 +34,66 @@ function cutSection(section: string, maxChars: number): string {
   return kept + truncationMarker(lines.length - count);
 }
 
+/** What a section costs when cut down as far as it goes: its header line plus the truncation marker. */
+function minimumCost(section: string): number {
+  const header = section.indexOf("\n") + 1 || section.length;
+  return Math.min(section.length, header + truncationMarker(section.length).length);
+}
+
 /**
  * Fit a diff into a token budget. Small files are kept whole; the budget they leave unused goes to
- * the large ones, which are cut at a line boundary. Every changed file stays visible by name.
+ * the large ones, which are cut at a line boundary. Every changed file stays visible by name, unless
+ * even the file names do not fit: then as many as fit are listed, followed by a count of the rest.
  */
 export function fitDiff(diff: string, budgetTokens: number): string {
-  const charBudget = budgetTokens * CHARS_PER_TOKEN;
+  let charBudget = budgetTokens * CHARS_PER_TOKEN;
   if (diff.length <= charBudget) return diff;
 
-  const sections: string[] = [];
+  let sections: string[] = [];
   for (const line of diff.split(/(?<=\n)/)) {
     if (line.startsWith("diff --git ") || sections.length === 0) sections.push(line);
     else sections[sections.length - 1] += line;
   }
 
-  // Smallest first, so whatever a small file does not need is shared among the larger ones.
+  // When the headers alone are too much, show the first files and count the others.
+  let footer = "";
+  if (sections.reduce((sum, section) => sum + minimumCost(section), 0) > charBudget) {
+    const notShown = (count: number) => `[... ${count} more files not shown ...]\n`;
+    const room = charBudget - notShown(sections.length).length;
+    let used = 0;
+    let shown = 0;
+    while (shown < sections.length && used + minimumCost(sections[shown]!) <= room) used += minimumCost(sections[shown++]!);
+    footer = notShown(sections.length - shown);
+    sections = sections.slice(0, shown);
+    charBudget -= footer.length;
+  }
+
+  // Every file is guaranteed its minimum. What is left is shared smallest first, so whatever a
+  // small file does not need goes to the larger ones.
+  let spare = charBudget - sections.reduce((sum, section) => sum + minimumCost(section), 0);
   const order = sections.map((_, i) => i).sort((a, b) => sections[a]!.length - sections[b]!.length);
-  let remaining = charBudget;
   order.forEach((index, position) => {
-    const share = Math.floor(remaining / (order.length - position));
     const section = sections[index]!;
-    if (section.length > share) sections[index] = cutSection(section, share);
-    remaining -= Math.min(sections[index]!.length, share);
+    const minimum = minimumCost(section);
+    const allowance = minimum + Math.floor(spare / (order.length - position));
+    if (section.length > allowance) sections[index] = cutSection(section, allowance);
+    spare -= Math.min(section.length, allowance) - minimum;
   });
-  return sections.join("");
+  return sections.join("") + footer;
+}
+
+/** Fit a `git diff --stat` into a token budget: the first files, a count of the rest, and the summary line. */
+export function fitStat(stat: string, budgetTokens: number): string {
+  const charBudget = budgetTokens * CHARS_PER_TOKEN;
+  if (stat.length <= charBudget) return stat;
+  const lines = stat.trimEnd().split("\n");
+  const summary = lines.pop() ?? "";
+  const more = (count: number) => `[... ${count} more files ...]\n`;
+  const room = charBudget - summary.length - 1 - more(lines.length).length;
+  let kept = "";
+  let count = 0;
+  while (count < lines.length && kept.length + lines[count]!.length + 1 <= room) kept += `${lines[count++]}\n`;
+  return `${kept}${more(lines.length - count)}${summary}\n`;
 }
 
 /** The line (0-based) where a symbol is declared, or -1. Falls back to its first call or assignment. */

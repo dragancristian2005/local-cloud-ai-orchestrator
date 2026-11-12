@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { BILLING_ENV_VARS } from "../../src/backends/claude-cli.ts";
 
 const CLI = path.resolve(import.meta.dirname, "../../src/cli.ts");
 
@@ -14,7 +15,10 @@ export interface CliResult {
 /** Run the real CLI in a child process. */
 export function runCli(args: string[], env: Record<string, string> = {}): Promise<CliResult> {
   return new Promise((resolve) => {
-    execFile(process.execPath, [CLI, ...args], { env: { ...process.env, ...env } }, (err, stdout, stderr) => {
+    // Start from this machine's environment minus the variables the Claude backend refuses to run with.
+    const base = { ...process.env };
+    for (const key of BILLING_ENV_VARS) delete base[key];
+    execFile(process.execPath, [CLI, ...args], { env: { ...base, ...env } }, (err, stdout, stderr) => {
       const code = err === null ? 0 : typeof err.code === "number" ? err.code : 1;
       resolve({ code, stdout, stderr });
     });

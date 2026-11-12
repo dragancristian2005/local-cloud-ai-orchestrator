@@ -71,3 +71,10 @@ test("the committed config loads", () => {
   const cfg = loadConfig();
   assert.ok(cfg.chains["commit-message"]);
 });
+
+test("rejects a baseUrl that is not an http URL", () => {
+  for (const baseUrl of ["192.168.1.50:11434", "mypc:11434", "ftp://mypc:11434"]) {
+    const file = writeConfig({ ...BASE, backends: { "pc-ollama": { ...BASE.backends["pc-ollama"], baseUrl } } });
+    assert.throws(() => loadConfig(file), (err: unknown) => err instanceof ConfigError && /baseUrl/.test(err.message), baseUrl);
+  }
+});

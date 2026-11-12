@@ -109,11 +109,11 @@ Agent loops on the local model, multi-backend adapters for other CLIs, a web UI,
 - **CLI parsing:** `node:util` `parseArgs`. Zero runtime dependencies; dev dependencies are `typescript` and `@types/node` only.
 - **No build step:** Node >= 22.18 runs the `.ts` files directly. Erasable TypeScript only (no `enum`, no parameter properties); relative imports carry `.ts`.
 - **`orch run` reads flags only.** Task files exist only for the fixed eval set (`eval/fixed-tasks/<id>/task.json`).
-- **Prompt budget:** 6000 tokens (estimated as chars / 4), with `num_ctx` 8192 sent to Ollama.
+- **Prompt budget:** 6000 tokens (estimated pessimistically as chars / 3), with `num_ctx` 8192 sent to Ollama. A prompt that fills `num_ctx` is treated as truncated and logged as `backend_error`.
 - **Retries:** decided by `decideNext` in `src/core/policy.ts`. The run loop never retries more than `retryBeforeEscalate` times, whatever the policy says.
-- **Log record:** the fields above plus `attempt`, `mode` (`run` | `eval`) and `taskId`. Raw outputs are `runs/<runId>/tier<N>-attempt<M>.txt`.
+- **Log record:** the fields above plus `attempt`, `mode` (`run` | `eval`) and `taskId`. Raw outputs are `runs/<runId>/tier<N>-attempt<M>.txt`. For an attempt that produced no output (unreachable, timeout, backend error), `verifyDetail` holds the error message.
 - **Verifier rules:** in each file under `src/tasks/`. The shell-command verifier arrives with M4.
-- **Claude flags:** `docs/claude-cli-flags.md`. Never `--bare` (it ignores the subscription login).
+- **Claude flags:** `docs/claude-cli-flags.md`. Never `--bare` (it ignores the subscription login). The Claude backend refuses to run while `ANTHROPIC_API_KEY` or a similar billing/gateway variable is set; it checks names only.
 
 ## Working on this repo
 - `npm test` runs everything with a fake Ollama server and a fake `claude` binary; it needs neither the PC nor the real CLI. `npm run typecheck` runs `tsc --noEmit`.

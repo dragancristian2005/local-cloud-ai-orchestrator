@@ -1,4 +1,4 @@
-import { estimateTokens, fitDiff } from "../core/context.ts";
+import { estimateTokens, fitDiff, fitStat } from "../core/context.ts";
 import { maxLines, noCodeFence, nonEmpty, runChecks } from "../core/verifier.ts";
 import type { Check } from "../core/verifier.ts";
 import type { PreparedTask, TaskInput } from "../core/types.ts";
@@ -70,11 +70,28 @@ const checks: Check[] = [
       : 'subject should start with an imperative verb ("Add", not "Added"/"Adds"/"Adding")',
 ];
 
+const LABEL = /^(commit message|subject)\s*:\s*/i;
+
+/** Remove markdown emphasis around a whole line, and a "Commit message:" / "Subject:" label in front of it. */
+function unlabel(line: string): string {
+  const plain = line.trim().replace(/^(\*\*|__|\*|_)(.*)\1$/, "$2").trim();
+  return plain.replace(LABEL, "").replace(/^(\*\*|__|\*|_)(.*)\1$/, "$2").trim();
+}
+
 function normalize(raw: string): string {
   let text = cleanModelOutput(raw);
-  const firstLine = subjectOf(text);
-  if (firstLine.trimEnd().endsWith(":") && CHATTY_FIRST_LINE.test(firstLine)) {
-    text = cleanModelOutput(text.slice(firstLine.length));
+  // Up to two leading lines can be wrapping: an introduction ("Here is the commit message:") and a label.
+  for (let pass = 0; pass < 2; pass++) {
+    const firstLine = subjectOf(text);
+    const subject = unlabel(firstLine);
+    const isIntro = subject.endsWith(":") && CHATTY_FIRST_LINE.test(subject);
+    if (subject === "" || isIntro) {
+      if (firstLine === text) break;
+      text = cleanModelOutput(text.slice(firstLine.length));
+    } else {
+      text = subject + text.slice(firstLine.length);
+      break;
+    }
   }
   return text;
 }
@@ -82,7 +99,8 @@ function normalize(raw: string): string {
 export const commitMessage: TaskModule = {
   type: "commit-message",
   prepare(input: TaskInput, budgetTokens: number): PreparedTask {
-    const stat = input.stat ?? "";
+    // The file list gets at most a sixth of the prompt; the diff gets the rest.
+    const stat = fitStat(input.stat ?? "", Math.floor(budgetTokens / 6));
     // What the template and the stat use is not available to the diff; 2 tokens cover rounding.
     const diffBudget = Math.max(0, budgetTokens - estimateTokens(TEMPLATE) - estimateTokens(stat) - 2);
     const diff = fitDiff(input.text, diffBudget);

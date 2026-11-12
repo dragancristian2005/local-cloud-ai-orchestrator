@@ -55,3 +55,7 @@ test("verify fails a pytest file without a test function", () => {
 test("normalize unwraps the code fence models put around code", () => {
   assert.equal(tsTask.normalize("```typescript\n" + GOOD_TS + "\n```"), GOOD_TS);
 });
+
+test("normalize drops a closing remark after the fenced file", () => {
+  assert.equal(tsTask.normalize("```ts\n" + GOOD_TS + "\n```\n\nThese tests cover the typical cases."), GOOD_TS);
+});

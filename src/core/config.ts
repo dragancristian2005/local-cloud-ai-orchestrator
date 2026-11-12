@@ -86,13 +86,27 @@ function nonEmptyString(value: unknown, what: string): string {
   return value;
 }
 
+function httpUrl(value: unknown, what: string): string {
+  const text = nonEmptyString(value, what);
+  let url: URL | undefined;
+  try {
+    url = new URL(text);
+  } catch {
+    url = undefined;
+  }
+  if (url === undefined || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    throw new ConfigError(`${what} must be a full URL such as "http://192.168.1.50:11434" (got ${JSON.stringify(text)})`);
+  }
+  return text.replace(/\/+$/, "");
+}
+
 function parseBackend(id: string, raw: unknown): BackendConfig {
   if (!isObject(raw)) throw new ConfigError(`backend "${id}" must be an object`);
   const where = `backend "${id}"`;
   if (raw.type === "ollama") {
     return {
       type: "ollama",
-      baseUrl: nonEmptyString(raw.baseUrl, `${where} baseUrl`).replace(/\/+$/, ""),
+      baseUrl: httpUrl(raw.baseUrl, `${where} baseUrl`),
       model: nonEmptyString(raw.model, `${where} model`),
       timeoutMs: positiveNumber(raw.timeoutMs, `${where} timeoutMs`),
       healthTimeoutMs:

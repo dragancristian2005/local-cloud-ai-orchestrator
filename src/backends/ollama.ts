@@ -86,10 +86,21 @@ export class OllamaBackend implements Backend {
       throw new BackendError("backend_error", `Ollama returned no text for model ${this.model}`);
     }
 
+    // Ollama cuts a prompt that does not fit, without saying so. A prompt that fills the whole
+    // window was almost certainly cut, and an answer to half a prompt is not worth verifying.
+    const promptTokens = optionalNumber(body?.prompt_eval_count);
+    const window = this.cfg.options.num_ctx;
+    if (typeof window === "number" && promptTokens !== undefined && promptTokens >= window) {
+      throw new BackendError(
+        "backend_error",
+        `prompt was truncated by Ollama: it filled the ${window}-token context window of ${this.model} (raise options.num_ctx or lower promptTokenBudget)`,
+      );
+    }
+
     return {
       text,
       durationMs: Date.now() - started,
-      promptTokens: optionalNumber(body?.prompt_eval_count),
+      promptTokens,
       outputTokens: optionalNumber(body?.eval_count),
       model: this.model,
     };

@@ -13,6 +13,21 @@ const CLAUDE_ARGS = ["-p", "--output-format", "json", "--tools", "", "--no-sessi
 const HEALTH_TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 2000;
 
+/**
+ * With any of these set, `claude -p` stops using the subscription login: it bills an API key,
+ * or talks to another provider or gateway. This project is zero-cost and never routes the
+ * subscription elsewhere, so the backend refuses to start. Only the names are checked; the
+ * values are never read.
+ */
+export const BILLING_ENV_VARS = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+];
+
 interface ClaudeResult {
   result?: unknown;
   is_error?: unknown;
@@ -62,6 +77,15 @@ export class ClaudeCliBackend implements Backend {
   }
 
   run(req: BackendRequest): Promise<BackendResult> {
+    const blocking = BILLING_ENV_VARS.find((name) => (process.env[name] ?? "") !== "");
+    if (blocking !== undefined) {
+      return Promise.reject(
+        new BackendError(
+          "backend_error",
+          `${blocking} is set in your environment: claude would not use your subscription login. Unset it and run again.`,
+        ),
+      );
+    }
     const next = queue.then(() => this.runNow(req));
     queue = next.catch(() => {});
     return next;

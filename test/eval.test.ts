@@ -84,6 +84,22 @@ test("runEval stops when the PC goes away mid-run", async () => {
   assert.deepEqual(results.map((r) => [r.id, r.reason]), [["a", null], ["b", "pc_unreachable"]]);
 });
 
+test("runEval itself refuses a cloud backend", async () => {
+  const log = newLog();
+  const cloud = fakeBackend({ id: "claude", kind: "cloud", replies: [GOOD_COMMENT] });
+  await assert.rejects(runEval({ backend: cloud, tasks: [docTask("ds-a")], budgetTokens: 6000, log }), /refuses cloud backends/);
+  assert.deepEqual(cloud.prompts, []);
+  assert.deepEqual(log.readAll(), []);
+});
+
+test("runEval stops at the first backend error, so a mistyped model does not fill the log", async () => {
+  const log = newLog();
+  const backend = fakeBackend({ id: "pc", replies: [new BackendError("backend_error", "model 'typo' not found"), GOOD_COMMENT] });
+  const results = await runEval({ backend, tasks: [docTask("a"), docTask("b"), docTask("c")], budgetTokens: 6000, log });
+  assert.deepEqual(results.map((r) => [r.id, r.reason]), [["a", "backend_error"]]);
+  assert.equal(log.readAll().length, 1);
+});
+
 test("orch eval refuses a cloud backend", async () => {
   const { configPath, runsDir } = writeTempConfig(twoTierConfig("http://127.0.0.1:1"));
   const env = fakeClaudeEnv();

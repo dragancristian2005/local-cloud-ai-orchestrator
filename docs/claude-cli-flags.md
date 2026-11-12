@@ -19,6 +19,12 @@ row below, and update this line.
 The prompt is written to stdin. The working directory is a fresh temp directory, so no project
 files are in reach.
 
+Environment: the backend passes your environment through unchanged, and refuses to start `claude`
+while any of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`,
+`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is set. With one of
+those, `claude -p` would bill an API key or use another provider instead of your subscription login.
+Only the names are checked; the values are never read.
+
 Never used:
 
 - `--bare`: its help text says OAuth and the keychain are never read, so it would require an API key.

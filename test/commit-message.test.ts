@@ -37,6 +37,41 @@ test("normalize drops a chatty first line", () => {
   assert.equal(task.normalize("Sure! Here's the commit message:\n\n```\nAdd x\n```"), "Add x");
 });
 
+test("cleanModelOutput keeps the inside of a single fence with an intro line and an outro", () => {
+  assert.equal(cleanModelOutput("Here is the result:\n\n```ts\nconst a = 1;\n```"), "const a = 1;");
+  assert.equal(cleanModelOutput("```ts\nconst a = 1;\n```\n\nThese lines cover the typical cases."), "const a = 1;");
+  assert.equal(cleanModelOutput("Sure!\n```\nconst a = 1;\n```\nLet me know."), "const a = 1;");
+});
+
+test("cleanModelOutput accepts unusual fence openers", () => {
+  assert.equal(cleanModelOutput("```c++ \nint a;\n```"), "int a;");
+  assert.equal(cleanModelOutput("````\nint a;\n````"), "int a;");
+});
+
+test("cleanModelOutput leaves a fence alone when the text before it is not an intro", () => {
+  const message = "Add x\n\nExample:\n```\nfoo\n```";
+  assert.equal(cleanModelOutput(message), message);
+  const two = "```\na\n```\n```\nb\n```";
+  assert.equal(cleanModelOutput(two), two);
+});
+
+test("cleanModelOutput leaves a fence inside a JSDoc comment alone", () => {
+  const comment = "/**\n * Clamp.\n * ```ts\n * clamp(1, 0, 3)\n * ```\n */";
+  assert.equal(cleanModelOutput(comment), comment);
+});
+
+test("normalize handles an intro, a fence and an outro around the message", () => {
+  const raw = "Here's a commit message for the change:\n\n```\nAdd clamp helper\n```\n\nLet me know if you'd like changes.";
+  assert.equal(task.normalize(raw), "Add clamp helper");
+});
+
+test("normalize strips labels and markdown emphasis from the subject", () => {
+  assert.equal(task.normalize("**Commit message:**\n\nAdd x"), "Add x");
+  assert.equal(task.normalize("Commit message: Add x"), "Add x");
+  assert.equal(task.normalize("Subject: Add x\n\nBody text"), "Add x\n\nBody text");
+  assert.equal(task.normalize("**Add x**"), "Add x");
+});
+
 test("verify passes a plain imperative subject", () => {
   assert.deepEqual(verify("Add retry to fetch helper"), { status: "pass", detail: "" });
 });

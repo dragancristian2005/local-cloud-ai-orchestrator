@@ -1,18 +1,32 @@
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ClaudeCliBackend } from "../src/backends/claude-cli.ts";
+import { BILLING_ENV_VARS, ClaudeCliBackend } from "../src/backends/claude-cli.ts";
 import { createBackend } from "../src/backends/backend.ts";
 import { BackendError } from "../src/core/types.ts";
 
 const FAKE = path.resolve(import.meta.dirname, "fixtures/fake-claude.mjs");
 const ENV_KEYS = ["FAKE_CLAUDE_MODE", "FAKE_CLAUDE_TRACE", "FAKE_CLAUDE_ARGS", "FAKE_CLAUDE_REPLY"];
 
+// The machine running the tests may have these set; the backend refuses to run when they are.
+const savedEnv: Record<string, string | undefined> = {};
+
+beforeEach(() => {
+  for (const key of BILLING_ENV_VARS) {
+    savedEnv[key] = process.env[key];
+    delete process.env[key];
+  }
+});
+
 afterEach(() => {
   for (const key of ENV_KEYS) delete process.env[key];
+  for (const key of BILLING_ENV_VARS) {
+    if (savedEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = savedEnv[key];
+  }
 });
 
 function scratchFile(name: string): string {
@@ -74,6 +88,27 @@ test("a hanging call times out and the child is gone", async () => {
   const pid = Number(readFileSync(traceFile, "utf8").split(" ")[1]);
   assert.ok(pid > 0);
   assert.throws(() => process.kill(pid, 0), "the child should not be running any more");
+});
+
+for (const variable of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK"]) {
+  test(`refuses to start claude when ${variable} is set`, async () => {
+    process.env[variable] = "secret-value-123";
+    const traceFile = (process.env.FAKE_CLAUDE_TRACE = scratchFile("trace.txt"));
+    await assert.rejects(
+      backend().run({ prompt: "abc", timeoutMs: 5000 }),
+      (err: unknown) =>
+        err instanceof BackendError &&
+        err.reason === "backend_error" &&
+        err.message.includes(variable) &&
+        !err.message.includes("secret-value-123"),
+    );
+    assert.equal(existsSync(traceFile), false, "claude must not have been started");
+  });
+}
+
+test("an empty billing variable does not block the call", async () => {
+  process.env.ANTHROPIC_API_KEY = "";
+  assert.equal((await backend().run({ prompt: "abc", timeoutMs: 5000 })).text, "cba");
 });
 
 test("healthCheck is true when the binary answers --version", async () => {

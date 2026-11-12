@@ -16,7 +16,7 @@ Parts 2 and 3 on the Mac. Allow about 30 minutes, most of it the model download.
 > line; delete this box when the list is empty.
 >
 > - Part 1, steps 1–8 (everything on the PC)
-> - Part 2, step 1: the `claude` sign-in check
+> - Part 2, step 1: the `claude` sign-in check and the API-key check
 > - Part 2, step 5: the connection test from the Mac to the real PC
 > - Part 3, steps 1–4 against a real model (they were run against a stand-in)
 
@@ -141,6 +141,17 @@ claude -p "Say hi in five words."
 
 It should print a short answer. If it asks you to log in, run `claude` once and follow `/login`.
 
+Last, make sure no API key is exported in your shell, because `claude -p` would bill that key
+instead of using your subscription:
+
+```sh
+env | grep -E '^(ANTHROPIC_|CLAUDE_CODE_USE_)' | cut -d= -f1
+```
+
+This should print nothing. If it prints `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+`ANTHROPIC_BASE_URL` or a `CLAUDE_CODE_USE_...` name, remove that line from your shell profile.
+`orch` refuses to use the Claude tier while one of them is set.
+
 ### 2. Get the code and run the tests
 
 ```sh
@@ -243,17 +254,18 @@ The first line appears after about 3 seconds. The message now comes from Claude.
 
 ### 4. Compare a second model
 
-On the PC:
+Pick a second model that fits in 8 GB from <https://ollama.com/library> and copy its exact tag
+from that page (written `<second-model>` below). On the PC:
 
 ```powershell
-ollama pull qwen3.5:9b
+ollama pull <second-model>
 ```
 
 On the Mac:
 
 ```sh
 orch eval --backend pc-ollama
-orch eval --backend pc-ollama --model qwen3.5:9b
+orch eval --backend pc-ollama --model <second-model>
 orch report --mode eval
 ```
 
@@ -262,7 +274,7 @@ shows one row per model:
 
 ```
 backend    model             attempts  pass %  escalated %  avg s  pc down
-pc-ollama  qwen3.5:9b              12      83            -    2.1        0
+pc-ollama  <second-model>          12      83            -    2.1        0
 pc-ollama  qwen2.5-coder:7b        12      67            -    1.4        0
 ```
 
@@ -277,6 +289,9 @@ against the subscription.
 |---|---|---|
 | `pc_unreachable` although the PC is on | `OLLAMA_HOST` not applied, firewall, or wrong address | On the PC, `curl.exe http://<address>:11434/api/tags`. If only `localhost` works, redo Part 1 step 3 and restart Ollama. If the PC works but the Mac does not, redo step 4 and check the network is *Private*. |
 | `backend_error ... HTTP 404 for model ...` | The model is not downloaded on the PC | `ollama pull <model>` on the PC, or fix `model` in `config/orchestrator.local.json`. |
+| `backend "pc-ollama" still has the placeholder address PC_ADDRESS` | `config/orchestrator.local.json` is missing or has no `baseUrl` | Create it as in Part 2, step 4. |
+| `backend_error: ... prompt was truncated by Ollama` | The prompt did not fit the model's context window | Stage fewer generated files (lockfiles), or lower `promptTokenBudget` in the config. |
+| `backend_error: ANTHROPIC_API_KEY is set in your environment` | An API key or gateway variable is exported in your shell | Remove it from your shell profile (Part 2, step 1). `orch` will not bill an API key. |
 | The first call after a break takes 10–30 s | Ollama unloaded the model after 5 minutes | Nothing to fix. To keep it loaded longer, set the `OLLAMA_KEEP_ALIVE` variable on the PC (for example `1h`) the same way as `OLLAMA_HOST`. |
 | `timeout` on every call | The model does not fit in 8 GB of VRAM and runs partly on the CPU | `ollama ps` on the PC: anything but `100% GPU` means too big. Use a smaller model. |
 | `verify fail` again and again | The model's answers break the task's rules | Read the reason in the stderr line; look at the raw answer in `runs/<run id>/`. Try another model with `--model`. |

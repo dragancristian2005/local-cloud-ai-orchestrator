@@ -1,19 +1,27 @@
 const THINK_BLOCK = /<think>[\s\S]*?<\/think>/gi;
 // A reasoning model cut off mid-thought: "<think>" with no closing tag, up to the first blank line.
 const UNCLOSED_THINK = /^\s*<think>[\s\S]*?(\n\s*\n|$)/i;
-const WHOLE_FENCE = /^```[\w-]*\n([\s\S]*?)\n```$/;
+// A fenced block whose fence lines start at column 0. A fence inside a comment (" * ```ts") does not match.
+const FENCED_BLOCK = /^(`{3,})[^\n]*\n([\s\S]*?)\n\1[ \t]*$/gm;
+// What may stand in front of the fence: nothing, or one line that ends like a sentence ("Here it is:").
+const INTRO_LINE = /^[^\n]*[:.!]$/;
 const QUOTE_PAIRS: Record<string, string> = { '"': '"', "'": "'", "`": "`", "“": "”" };
 
 /**
  * Strip the wrapping small models add around an answer: reasoning blocks, a code fence around the
- * whole answer, quotes around a one-line answer. The answer itself is not changed.
+ * answer (with an optional one-line introduction and any closing remark), quotes around a one-line
+ * answer. The answer itself is not changed.
  */
 export function cleanModelOutput(raw: string): string {
   let text = raw.replace(/\r\n/g, "\n").replace(THINK_BLOCK, "");
   text = text.replace(UNCLOSED_THINK, "").trim();
 
-  const fenced = WHOLE_FENCE.exec(text);
-  if (fenced?.[1] !== undefined && !fenced[1].includes("```")) text = fenced[1].trim();
+  const blocks = [...text.matchAll(FENCED_BLOCK)];
+  if (blocks.length === 1) {
+    const block = blocks[0]!;
+    const before = text.slice(0, block.index).trim();
+    if (before === "" || INTRO_LINE.test(before)) text = (block[2] ?? "").trim();
+  }
 
   if (!text.includes("\n") && text.length >= 2) {
     const closing = QUOTE_PAIRS[text[0] as string];

@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { chatReplies, closedPortUrl, startFakeOllama } from "./helpers/fake-ollama.ts";
 import { fakeClaudeEnv, ollamaOnlyConfig, runCli, twoTierConfig, writeTempConfig } from "./helpers/run-cli.ts";
-import { makeTempRepo } from "./helpers/temp-repo.ts";
+import { makeTempDir, makeTempRepo } from "./helpers/temp-repo.ts";
 
 function logLines(runsDir: string): Record<string, unknown>[] {
   return readFileSync(path.join(runsDir, "log.jsonl"), "utf8")
@@ -98,6 +98,36 @@ test("falls through to Claude when the PC is unreachable", async () => {
   assert.equal(lines[1]!.backend, "claude");
   assert.equal(lines[1]!.verify, "pass");
   assert.equal(lines[1]!.model, "fake-model");
+});
+
+test("an exported API key blocks the Claude tier instead of billing it", async () => {
+  const repo = await makeTempRepo({ "greet.ts": "export const hi = 1;\n" }, { stage: true });
+  const { configPath } = writeTempConfig(twoTierConfig(await closedPortUrl()));
+  const env = fakeClaudeEnv({ ANTHROPIC_API_KEY: "secret-value-123" });
+  const result = await runCli(["run", "--type", "commit-message", "--repo", repo, "--config", configPath], env);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /ANTHROPIC_API_KEY/);
+  assert.doesNotMatch(result.stderr, /secret-value-123/);
+  assert.equal(existsSync(env.FAKE_CLAUDE_TRACE!), false);
+});
+
+test("the untouched PC_ADDRESS placeholder is a config error, not an outage", async () => {
+  const repo = await makeTempRepo({ "greet.ts": "export const hi = 1;\n" }, { stage: true });
+  const { configPath, runsDir } = writeTempConfig(twoTierConfig("http://PC_ADDRESS:11434"));
+  const env = fakeClaudeEnv({ FAKE_CLAUDE_REPLY: "Add greeting helper" });
+  const result = await runCli(["run", "--type", "commit-message", "--repo", repo, "--config", configPath], env);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /PC_ADDRESS/);
+  assert.match(result.stderr, /orchestrator\.local\.json/);
+  assert.equal(existsSync(env.FAKE_CLAUDE_TRACE!), false, "must not fall through to Claude");
+  assert.equal(existsSync(path.join(runsDir, "log.jsonl")), false);
+});
+
+test("outside a git repository the error says so", async () => {
+  const { configPath } = writeTempConfig(ollamaOnlyConfig("http://127.0.0.1:1"));
+  const result = await runCli(["run", "--type", "commit-message", "--repo", makeTempDir(), "--config", configPath]);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /not a git repository/);
 });
 
 test("escalates to Claude after the local model fails twice", async () => {
