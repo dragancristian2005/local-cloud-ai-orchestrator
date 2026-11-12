@@ -104,7 +104,18 @@ Log record (one JSON line per attempt):
 ## Non-goals
 Agent loops on the local model, multi-backend adapters for other CLIs, a web UI, benchmarks like SWE-bench (too costly for a zero-budget project), selling it.
 
-## Open decisions for the first session
-- Config format (JSON vs YAML) and CLI parsing library (keep dependencies minimal).
-- Exact verifier rules per task type.
-- Whether `orch run` reads the task from flags only or also from a file.
+## Decisions (settled in the first session)
+- **Config:** JSON, parsed by `JSON.parse`. A gitignored `config/orchestrator.local.json` is merged over the committed file.
+- **CLI parsing:** `node:util` `parseArgs`. Zero runtime dependencies; dev dependencies are `typescript` and `@types/node` only.
+- **No build step:** Node >= 22.18 runs the `.ts` files directly. Erasable TypeScript only (no `enum`, no parameter properties); relative imports carry `.ts`.
+- **`orch run` reads flags only.** Task files exist only for the fixed eval set (`eval/fixed-tasks/<id>/task.json`).
+- **Prompt budget:** 6000 tokens (estimated as chars / 4), with `num_ctx` 8192 sent to Ollama.
+- **Retries:** decided by `decideNext` in `src/core/policy.ts`. The run loop never retries more than `retryBeforeEscalate` times, whatever the policy says.
+- **Log record:** the fields above plus `attempt`, `mode` (`run` | `eval`) and `taskId`. Raw outputs are `runs/<runId>/tier<N>-attempt<M>.txt`.
+- **Verifier rules:** in each file under `src/tasks/`. The shell-command verifier arrives with M4.
+- **Claude flags:** `docs/claude-cli-flags.md`. Never `--bare` (it ignores the subscription login).
+
+## Working on this repo
+- `npm test` runs everything with a fake Ollama server and a fake `claude` binary; it needs neither the PC nor the real CLI. `npm run typecheck` runs `tsc --noEmit`.
+- Tests come first: write the failing test, then the code.
+- The plan for M1-M3 is `docs/superpowers/plans/2026-11-12-tiered-orchestrator.md`. M4 gets its own plan.

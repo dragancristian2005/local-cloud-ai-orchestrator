@@ -7,6 +7,7 @@ import { loadConfig, PROJECT_ROOT } from "./core/config.ts";
 import { collectInput } from "./core/context.ts";
 import { runTask } from "./core/orchestrator.ts";
 import { BackendError, ConfigError, InputError } from "./core/types.ts";
+import { formatTable, summarize } from "./log/report.ts";
 import { RunLog } from "./log/run-log.ts";
 import { taskModules } from "./tasks/task.ts";
 
@@ -15,6 +16,7 @@ const USAGE = `usage: orch <command> [options]
 commands:
   run     run one task through its chain of backends and print the result
   eval    run the fixed task set against one local backend, to compare models
+  report  print pass rate, escalation rate and average time per model, from the log
 
 orch run --type <task type> [--repo <path>] [--file <path>] [--symbol <name>]
          [--config <path>] [--model <name>]
@@ -31,6 +33,11 @@ orch eval --backend <name> [--model <name>] [--type <task type>] [--config <path
   --backend  a local backend from the config (cloud backends are refused)
   --model    evaluate this model instead of the configured one
   --type     only the fixed tasks of this task type
+
+orch report [--mode run|eval] [--type <task type>] [--config <path>]
+
+  --mode     only records from "orch run" or only from "orch eval" (default: both)
+  --type     only records of this task type
 `;
 
 const FIXED_TASKS_DIR = path.join(PROJECT_ROOT, "eval", "fixed-tasks");
@@ -137,6 +144,30 @@ async function evalCommand(args: string[]): Promise<number> {
   }
 }
 
+function reportCommand(args: string[]): number {
+  const { values } = parse({
+    args,
+    options: {
+      mode: { type: "string" },
+      type: { type: "string" },
+      config: { type: "string" },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+  const mode = values.mode;
+  if (mode !== undefined && mode !== "run" && mode !== "eval") throw new UsageError(`--mode must be "run" or "eval"`);
+  const config = loadConfig(values.config ? path.resolve(values.config) : undefined);
+  const records = new RunLog(config.runsDir).readAll();
+  if (records.length === 0) {
+    process.stdout.write("no runs logged yet\n");
+    return 0;
+  }
+  const rows = summarize(records, { mode, taskType: values.type });
+  process.stdout.write(rows.length === 0 ? "no runs match these filters\n" : formatTable(rows));
+  return 0;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   try {
@@ -146,6 +177,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     if (command === "run") return await runCommand(rest);
     if (command === "eval") return await evalCommand(rest);
+    if (command === "report") return reportCommand(rest);
     throw new UsageError(command === undefined ? "no command given" : `unknown command "${command}"`);
   } catch (err) {
     if (err instanceof UsageError) {
