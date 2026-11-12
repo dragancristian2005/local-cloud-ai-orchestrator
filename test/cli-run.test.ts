@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { chatReplies, closedPortUrl, startFakeOllama } from "./helpers/fake-ollama.ts";
-import { ollamaOnlyConfig, runCli, writeTempConfig } from "./helpers/run-cli.ts";
+import { fakeClaudeEnv, ollamaOnlyConfig, runCli, twoTierConfig, writeTempConfig } from "./helpers/run-cli.ts";
 import { makeTempRepo } from "./helpers/temp-repo.ts";
 
 function logLines(runsDir: string): Record<string, unknown>[] {
@@ -80,6 +80,42 @@ test("PC unreachable: exit 1, empty stdout, logged as pc_unreachable", async () 
   assert.equal(lines.length, 1);
   assert.equal(lines[0]!.fallbackReason, "pc_unreachable");
   assert.match(result.stderr, /pc_unreachable/);
+});
+
+test("falls through to Claude when the PC is unreachable", async () => {
+  const repo = await makeTempRepo({ "greet.ts": "export const hi = 1;\n" }, { stage: true });
+  const { configPath, runsDir } = writeTempConfig(twoTierConfig(await closedPortUrl()));
+  const env = fakeClaudeEnv({ FAKE_CLAUDE_REPLY: "Add greeting helper" });
+  const result = await runCli(["run", "--type", "commit-message", "--repo", repo, "--config", configPath], env);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout, "Add greeting helper\n");
+  const lines = logLines(runsDir);
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0]!.fallbackReason, "pc_unreachable");
+  assert.equal(lines[0]!.escalated, true);
+  assert.equal(lines[1]!.tier, 1);
+  assert.equal(lines[1]!.backend, "claude");
+  assert.equal(lines[1]!.verify, "pass");
+  assert.equal(lines[1]!.model, "fake-model");
+});
+
+test("escalates to Claude after the local model fails twice", async () => {
+  const server = await startFakeOllama(chatReplies("Here are some thoughts about your diff."));
+  try {
+    const repo = await makeTempRepo({ "greet.ts": "export const hi = 1;\n" }, { stage: true });
+    const { configPath, runsDir } = writeTempConfig(twoTierConfig(server.url));
+    const env = fakeClaudeEnv({ FAKE_CLAUDE_REPLY: "Add greeting helper" });
+    const result = await runCli(["run", "--type", "commit-message", "--repo", repo, "--config", configPath], env);
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, "Add greeting helper\n");
+    const lines = logLines(runsDir);
+    assert.deepEqual(lines.map((line) => [line.tier, line.attempt, line.verify]), [[0, 0, "fail"], [0, 1, "fail"], [1, 0, "pass"]]);
+    assert.equal(server.requests.filter((req) => req.path === "/api/chat").length, 2);
+  } finally {
+    await server.close();
+  }
 });
 
 test("a task type with no chain is a config error", async () => {
