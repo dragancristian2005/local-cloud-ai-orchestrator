@@ -28,13 +28,26 @@ function subjectOf(message: string): string {
   return message.split("\n")[0] ?? "";
 }
 
-// 👤 Yours to write (5-10 lines). Decide what "imperative-ish" means.
-// Skip an optional conventional-commit prefix ("fix:", "feat(cli):") and look at the first word.
-// Trade-off: a suffix rule (-ed, -ing, third-person -s) is tiny but rejects "Embed", "Bring", "Pass", "Address";
-// a deny-list of known offenders ("added", "fixes", "updating", ...) never rejects a good subject but misses rare verbs.
-// A false reject costs one retry and maybe an escalation; a false accept costs a slightly worse message.
+// Imperative verbs that end like a past tense, a gerund or a third person and would trip the suffix rule.
+const LOOKS_INFLECTED_BUT_IS_NOT = new Set([
+  "embed", "seed", "feed", "need", "speed", "shed", "exceed", "proceed", "succeed",
+  "bring", "ping", "ring", "string", "alias", "bias", "canvas",
+]);
+
+/**
+ * "Imperative-ish": the first word, after an optional conventional-commit prefix ("fix:",
+ * "feat(cli):"), does not look like a past tense (-ed), a gerund (-ing) or a third person (-s).
+ * A suffix rule with a short exception list: a false reject costs one retry, so the rule leans
+ * towards catching "Added"/"Adds"/"Adding" over accepting every rare verb.
+ */
 export function isImperativeish(subject: string): boolean {
-  throw new Error(`TODO(you): isImperativeish (called with ${JSON.stringify(subject)})`);
+  const afterPrefix = subject.replace(/^[a-z]+(\([^)]*\))?!?:\s*/i, "");
+  const first = (afterPrefix.trim().split(/\s+/)[0] ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  if (first === "") return false;
+  if (LOOKS_INFLECTED_BUT_IS_NOT.has(first)) return true;
+  if (/(ed|ing)$/.test(first)) return false;
+  // "adds", "fixes", "updates"; but not "pass", "address", "focus".
+  return !/[^su]s$/.test(first);
 }
 
 const checks: Check[] = [

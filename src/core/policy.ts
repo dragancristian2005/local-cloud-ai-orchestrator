@@ -16,13 +16,16 @@ export interface PolicyState {
 
 const MAX_PREVIOUS_OUTPUT_CHARS = 2000;
 
-// 👤 Yours to write (5-10 lines). This is the whole escalation policy.
-// Inputs: why the attempt failed, whether the backend is local or cloud, retries already used at this tier,
-// the configured retry count, and whether a stronger tier exists.
-// Think about: a retry on "cloud" spends a subscription call; a retry after pc_unreachable or timeout
-// will very likely fail the same way; on the last tier the only choices are "retry" and "stop".
+/**
+ * The escalation policy: what to do after a failed attempt.
+ * Only a rejected answer from a local model is worth a retry: the model gets the reason and one
+ * more try. A retry on Claude would spend a subscription call, and a retry after an unreachable
+ * PC, a timeout or a backend error would very likely fail the same way.
+ */
 export function decideNext(s: PolicyState): Decision {
-  throw new Error(`TODO(you): decideNext (called with ${JSON.stringify(s)})`);
+  const worthRetrying = s.reason === "verify_failed" && s.backendKind === "local";
+  if (worthRetrying && s.retriesUsed < s.retryBeforeEscalate) return "retry";
+  return s.isLastTier ? "stop" : "escalate";
 }
 
 /** The prompt for a retry: the original task plus the rejected answer and why it was rejected. */

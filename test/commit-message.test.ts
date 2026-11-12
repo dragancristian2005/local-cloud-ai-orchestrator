@@ -84,6 +84,23 @@ test("isImperativeish rejects past, third-person and -ing subjects", () => {
   assert.equal(isImperativeish("feat(cli): adds flag"), false);
 });
 
+test("isImperativeish accepts imperative verbs that only look inflected", () => {
+  for (const subject of ["Embed fonts in the PDF", "Bring back the --force flag", "Pass options through", "Address review comments", "Focus the input on open", "Process the queue in order", "Alias the old command"]) {
+    assert.equal(isImperativeish(subject), true, subject);
+  }
+});
+
+test("isImperativeish rejects other common non-imperative openings", () => {
+  for (const subject of ["Updates readme", "Refactored the parser", "Removing dead code", "docs: updated the guide", "Tests for the parser"]) {
+    assert.equal(isImperativeish(subject), false, subject);
+  }
+});
+
+test("isImperativeish rejects a subject with no word after the prefix", () => {
+  assert.equal(isImperativeish("fix:"), false);
+  assert.equal(isImperativeish(""), false);
+});
+
 test("verify fails a non-imperative subject with a hint", () => {
   assert.match(verify("Added retry to fetch helper").detail, /imperative/);
 });
