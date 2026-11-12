@@ -118,6 +118,31 @@ test("escalates to Claude after the local model fails twice", async () => {
   }
 });
 
+test("writes a docstring for a symbol", async () => {
+  const comment = "/**\n * Clamp n to the range [lo, hi].\n */";
+  const server = await startFakeOllama(chatReplies("```ts\n" + comment + "\n```"));
+  try {
+    const repo = await makeTempRepo({ "src/a.ts": "export function clamp(n: number, lo: number, hi: number) {\n  return n;\n}\n" });
+    const { configPath, runsDir } = writeTempConfig(ollamaOnlyConfig(server.url, ["docstring"]));
+    const result = await runCli(["run", "--type", "docstring", "--repo", repo, "--file", "src/a.ts", "--symbol", "clamp", "--config", configPath]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, comment + "\n");
+    assert.equal(logLines(runsDir)[0]!.taskType, "docstring");
+    // The source file is never modified.
+    assert.equal(readFileSync(path.join(repo, "src/a.ts"), "utf8").startsWith("export function clamp"), true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("a docstring task without --symbol exits 2", async () => {
+  const repo = await makeTempRepo({ "src/a.ts": "export const a = 1;\n" });
+  const { configPath } = writeTempConfig(ollamaOnlyConfig("http://127.0.0.1:1", ["docstring"]));
+  const result = await runCli(["run", "--type", "docstring", "--repo", repo, "--file", "src/a.ts", "--config", configPath]);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /--file and --symbol/);
+});
+
 test("a task type with no chain is a config error", async () => {
   const repo = await makeTempRepo({ "greet.ts": "export const hi = 1;\n" }, { stage: true });
   const { configPath } = writeTempConfig({ ...ollamaOnlyConfig("http://127.0.0.1:1"), chains: { other: ["pc-ollama"] } });

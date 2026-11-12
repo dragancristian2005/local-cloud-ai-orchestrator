@@ -3,6 +3,10 @@
     "pc-ollama": { "type": "ollama", "baseUrl": "http://PC_ADDRESS:11434", "model": "qwen2.5-coder:7b", "timeoutMs": 120000 },
     "claude": { "type": "claude-cli", "timeoutMs": 300000 }
   },
-  "chains": { "commit-message": ["pc-ollama", "claude"] },
+  "chains": {
+    "commit-message": ["pc-ollama", "claude"],
+    "docstring": ["pc-ollama", "claude"],
+    "test-stub": ["pc-ollama", "claude"]
+  },
   "retryBeforeEscalate": 1
 }
