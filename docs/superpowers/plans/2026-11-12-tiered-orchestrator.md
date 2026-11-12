@@ -635,7 +635,7 @@ Definitions, per `backend` + `model` group:
 
 CLI: `orch report [--mode run|eval] [--type <taskType>] [--config <path>]`. Columns: `backend`, `model`, `attempts`, `pass %`, `escalated %`, `avg s`, `pc down`. An empty log prints `no runs logged yet` and exits `0`.
 
-README sections: what it is; requirements (Node >= 22.18, `claude` signed in, Ollama on the PC); PC setup (set `OLLAMA_HOST` so Ollama listens on the LAN or Tailscale address, allow port 11434 in the firewall for the private network only, never forward the port on the router); Mac setup (`npm install`, `npm link`, `config/orchestrator.local.json`); the three commands with examples; how to swap models (`--model`, or the local config); the hard rules, linked to `CLAUDE.md`.
+README sections (short; the full walkthrough is `docs/SETUP.md`, Task 11): what it is; requirements (Node >= 22.18, `claude` signed in, Ollama on the PC); the three commands with examples; how to swap models (`--model`, or the local config); the hard rules, linked to `CLAUDE.md`.
 
 - [ ] **Step 1: Write the failing tests** with hand-built records:
   - `pass rate ignores unreachable attempts`: 3 pass, 1 `verify_failed`, 2 `pc_unreachable` -> `attempts 4`, `passRate 0.75`, `unreachable 2`.
@@ -650,6 +650,50 @@ README sections: what it is; requirements (Node >= 22.18, `claude` signed in, Ol
 - [ ] **Step 4: Run `npm test && npm run typecheck`.** Expected: pass.
 - [ ] **Step 5: On the Mac, with the PC on:** `orch eval --backend pc-ollama`, then again with `--model` set to a second model, then `orch report --mode eval`. Two rows appear.
 - [ ] **Step 6: Commit** — `feat: orch report and README`.
+
+### Task 11: Step-by-step setup tutorial for the PC and the Mac
+
+Written last, so every command in it has been run against the finished tool.
+
+**Files:**
+- Create: `docs/SETUP.md`
+- Modify: `README.md` (link to it from the requirements section)
+
+**Assumption:** the PC runs Windows. If it runs Linux, Part 1 uses `systemctl edit ollama` and `ufw` instead; say so before this task starts.
+
+The tutorial is for someone who has never used Ollama. Every step is one action, followed by the output that means it worked. Parts and their steps:
+
+**Part 1 — PC (Ollama server)**
+1. Install Ollama and check `ollama --version`.
+2. Pull the first model: `ollama pull qwen2.5-coder:7b`, then `ollama run qwen2.5-coder:7b "say hi"` to see it answer locally.
+3. Make Ollama listen on the home network: set the `OLLAMA_HOST` user environment variable, then quit and restart Ollama.
+4. Allow TCP port 11434 in Windows Firewall for the **Private** network profile only.
+5. Find the PC's address (`ipconfig`), and check from the PC itself that `http://<address>:11434/api/tags` answers.
+6. Optional: Tailscale on both machines, and use the PC's Tailscale name instead of the LAN address.
+7. A warning box: never forward port 11434 on the router, and never allow it on the Public profile.
+8. Sleep settings: what happens when the PC sleeps (the tool falls through to Claude in about 3 seconds), and how to keep it awake if wanted.
+
+**Part 2 — Mac (orchestrator)**
+1. Check the requirements: `node --version` is at least 22.18, `git --version`, `claude --version`, and `claude` is signed in.
+2. Clone the repository, `npm install`, `npm test` (all green without the PC).
+3. `npm link`, then `orch` prints its usage line.
+4. Create `config/orchestrator.local.json` with the PC's address and model. Show the full file.
+5. Check the connection from the Mac: `curl http://<pc>:11434/api/tags` lists the model.
+
+**Part 3 — First runs**
+1. Stage a change, `orch run --type commit-message --repo .`, and read the stderr progress line and the new line in `runs/log.jsonl`.
+2. `orch run --type docstring --file <path> --symbol <name>`.
+3. Turn the PC off and repeat step 1, to watch the run escalate to Claude.
+4. Try a second model: `ollama pull <model>` on the PC, then `orch eval --backend pc-ollama --model <model>` and `orch report --mode eval`.
+
+**Part 4 — Troubleshooting**, one row per symptom, giving the cause and the fix: `pc_unreachable` while the PC is on (firewall profile, wrong address, `OLLAMA_HOST` not applied until Ollama restarts); `backend_error` naming the model (not pulled); the first call after a pause is slow (model loading into VRAM); `timeout` (model too large for 8 GB VRAM and spilling to RAM); Claude tier fails (`claude` not signed in, or a flag changed: see `docs/claude-cli-flags.md`); `orch: command not found` (`npm link` not run).
+
+- [ ] **Step 1: Read Ollama's current documentation (its FAQ on exposing Ollama on the network and on setting environment variables on Windows) and note the exact variable name and steps.** Do not write the Windows steps from memory.
+- [ ] **Step 2: Write `docs/SETUP.md`** with the four parts above.
+- [ ] **Step 3: Run every Mac-side command in Parts 2 and 3 from a fresh clone in a temp directory**, with a fake Ollama standing in where no PC is reachable. Each command's real output matches what the tutorial says. Fix the tutorial where it does not.
+- [ ] **Step 4: Mark the steps that could not be run here** (all of Part 1, and Part 3 against a real model) in a short "Not yet verified on real hardware" list at the top of the file. 👤 You follow the tutorial once on your PC and Mac; each step that works is removed from that list, and the list is deleted when empty.
+- [ ] **Step 5: Run `npm test`.** Expected: pass.
+- [ ] **Step 6: Commit** — `docs: step-by-step setup tutorial for PC and Mac`.
 
 ---
 
