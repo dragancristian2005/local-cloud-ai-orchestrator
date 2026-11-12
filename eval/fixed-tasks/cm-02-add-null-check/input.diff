@@ -1,0 +1,16 @@
+diff --git a/src/user.ts b/src/user.ts
+index 71c0a55..e2b9f04 100644
+--- a/src/user.ts
++++ b/src/user.ts
+@@ -5,7 +5,10 @@ export interface User {
+   nickname?: string;
+ }
+ 
+-export function displayName(user: User): string {
++export function displayName(user: User | undefined): string {
++  if (!user) {
++    return "Guest";
++  }
+   if (user.nickname) {
+     return user.nickname;
+   }

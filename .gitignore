@@ -1,1 +1,4 @@
 .superpowers/
+node_modules/
+runs/
+config/orchestrator.local.json

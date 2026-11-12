@@ -1,0 +1,17 @@
+diff --git a/src/cart.ts b/src/cart.ts
+index 3f2a1b7..9c4d2e1 100644
+--- a/src/cart.ts
++++ b/src/cart.ts
+@@ -4,9 +4,9 @@ export interface Item {
+ }
+ 
+ export function cartTotal(items: Item[]): number {
+-  let t = 0;
++  let total = 0;
+   for (const item of items) {
+-    t += item.price * item.quantity;
++    total += item.price * item.quantity;
+   }
+-  return t;
++  return total;
+ }

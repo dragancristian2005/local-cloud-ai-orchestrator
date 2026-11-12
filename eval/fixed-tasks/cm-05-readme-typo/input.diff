@@ -1,0 +1,13 @@
+diff --git a/README.md b/README.md
+index 4b1e9aa..d03c7f2 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,7 @@
+ 
+ A small tool that backs up a folder to another disk.
+ 
+-## Instalation
++## Installation
+ 
+ ```sh
+ npm install
