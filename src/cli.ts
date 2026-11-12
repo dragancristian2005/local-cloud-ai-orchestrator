@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { formatEvalTable, loadFixedTasks, runEval } from "../eval/compare.ts";
 import { createBackend } from "./backends/backend.ts";
-import { loadConfig } from "./core/config.ts";
+import { loadConfig, PROJECT_ROOT } from "./core/config.ts";
 import { collectInput } from "./core/context.ts";
 import { runTask } from "./core/orchestrator.ts";
-import { ConfigError, InputError } from "./core/types.ts";
+import { BackendError, ConfigError, InputError } from "./core/types.ts";
 import { RunLog } from "./log/run-log.ts";
 import { taskModules } from "./tasks/task.ts";
 
 const USAGE = `usage: orch <command> [options]
 
 commands:
-  run   run one task through its chain of backends and print the result
+  run     run one task through its chain of backends and print the result
+  eval    run the fixed task set against one local backend, to compare models
 
 orch run --type <task type> [--repo <path>] [--file <path>] [--symbol <name>]
          [--config <path>] [--model <name>]
@@ -23,7 +25,15 @@ orch run --type <task type> [--repo <path>] [--file <path>] [--symbol <name>]
   --symbol   function or class name in --file (docstring, test-stub)
   --config   config file (default: config/orchestrator.config.json in the project)
   --model    use this model on the Ollama backends instead of the configured one
+
+orch eval --backend <name> [--model <name>] [--type <task type>] [--config <path>]
+
+  --backend  a local backend from the config (cloud backends are refused)
+  --model    evaluate this model instead of the configured one
+  --type     only the fixed tasks of this task type
 `;
+
+const FIXED_TASKS_DIR = path.join(PROJECT_ROOT, "eval", "fixed-tasks");
 
 /** Wrong command line. Exit code 2, with the usage text. */
 class UsageError extends Error {}
@@ -81,6 +91,52 @@ async function runCommand(args: string[]): Promise<number> {
   return 0;
 }
 
+async function evalCommand(args: string[]): Promise<number> {
+  const { values } = parse({
+    args,
+    options: {
+      backend: { type: "string" },
+      model: { type: "string" },
+      type: { type: "string" },
+      config: { type: "string" },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+  if (!values.backend) throw new UsageError("--backend is required");
+  const config = loadConfig(values.config ? path.resolve(values.config) : undefined);
+  const backendConfig = config.backends[values.backend];
+  if (!backendConfig) {
+    throw new ConfigError(`unknown backend "${values.backend}" (configured: ${Object.keys(config.backends).join(", ")})`);
+  }
+  const backend = createBackend(values.backend, backendConfig, { model: values.model });
+  if (backend.kind === "cloud") {
+    throw new InputError("eval refuses cloud backends: no bulk runs against the subscription");
+  }
+
+  let tasks = loadFixedTasks(FIXED_TASKS_DIR);
+  if (values.type) tasks = tasks.filter((task) => task.taskType === values.type);
+  if (tasks.length === 0) throw new UsageError(`no fixed tasks of type "${values.type}"`);
+
+  try {
+    const results = await runEval({
+      backend,
+      tasks,
+      budgetTokens: config.promptTokenBudget,
+      log: new RunLog(config.runsDir),
+      onProgress: (line) => process.stderr.write(line + "\n"),
+    });
+    process.stdout.write(formatEvalTable(results));
+    return results.at(-1)?.reason === "pc_unreachable" ? 1 : 0;
+  } catch (err) {
+    if (err instanceof BackendError) {
+      process.stderr.write(`orch: ${err.message}\n`);
+      return 1;
+    }
+    throw err;
+  }
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   try {
@@ -89,6 +145,7 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     if (command === "run") return await runCommand(rest);
+    if (command === "eval") return await evalCommand(rest);
     throw new UsageError(command === undefined ? "no command given" : `unknown command "${command}"`);
   } catch (err) {
     if (err instanceof UsageError) {

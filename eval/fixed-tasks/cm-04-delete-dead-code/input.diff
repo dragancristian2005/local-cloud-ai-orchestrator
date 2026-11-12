@@ -1,0 +1,22 @@
+diff --git a/src/dates.ts b/src/dates.ts
+index 8e7b3d1..2a90c4f 100644
+--- a/src/dates.ts
++++ b/src/dates.ts
+@@ -2,17 +2,6 @@ export function formatDate(date: Date): string {
+   return date.toISOString().slice(0, 10);
+ }
+ 
+-// Old format used by the v1 export. Nothing calls this any more.
+-export function legacyFormatDate(date: Date): string {
+-  const day = String(date.getDate()).padStart(2, "0");
+-  const month = String(date.getMonth() + 1).padStart(2, "0");
+-  return `${day}/${month}/${date.getFullYear()}`;
+-}
+-
+-function legacyPad(value: number): string {
+-  return value < 10 ? `0${value}` : String(value);
+-}
+-
+ export function daysBetween(a: Date, b: Date): number {
+   const ms = Math.abs(a.getTime() - b.getTime());
+   return Math.round(ms / 86_400_000);

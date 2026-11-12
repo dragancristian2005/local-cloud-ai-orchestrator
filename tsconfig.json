@@ -10,7 +10,16 @@
     "verbatimModuleSyntax": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src", "test", "eval"]
+  "include": [
+    "src",
+    "test",
+    "eval"
+  ],
+  "exclude": [
+    "eval/fixed-tasks"
+  ]
 }
