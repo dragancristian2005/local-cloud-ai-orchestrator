@@ -11,8 +11,15 @@ const HELP = `Type a message and press Enter. orch decides whether the local mod
   /exit     leave
 `;
 
+// Lines of a paste arrive within a few milliseconds of each other; typed lines do not.
+const PASTE_WINDOW_MS = 30;
+
 /** Lines from a stream, one at a time, for a loop that sometimes needs the next line as an answer. */
-function lineReader(input: NodeJS.ReadableStream): { next(): Promise<string | null> } {
+function lineReader(input: NodeJS.ReadableStream): {
+  next(): Promise<string | null>;
+  /** Take every line that has already arrived, without waiting. */
+  drain(): string[];
+} {
   const queue: string[] = [];
   let waiting: ((line: string | null) => void) | undefined;
   let closed = false;
@@ -30,6 +37,7 @@ function lineReader(input: NodeJS.ReadableStream): { next(): Promise<string | nu
     waiting = undefined;
   });
   return {
+    drain: () => queue.splice(0),
     next: () =>
       new Promise((resolve) => {
         const line = queue.shift();
@@ -55,8 +63,11 @@ function printable(text: string, keepLayout = false): string {
 
 function describe(event: ChatEvent): string {
   switch (event.type) {
-    case "handover":
-      return `(to claude: ${REASON_TEXT[event.reason]})`;
+    case "handover": {
+      // For a failure the reason alone says little; the error text says what to fix.
+      const failed = event.reason === "backend_error" || event.reason === "timeout";
+      return `(to claude: ${REASON_TEXT[event.reason]}${failed ? `: ${printable(event.detail)}` : ""})`;
+    }
     case "tool":
       return `  [${printable(event.summary)}]`;
     case "command":
@@ -78,12 +89,26 @@ export async function runRepl(opts: {
     approve: (command: string) => Promise<Approval>;
     onEvent: (event: ChatEvent) => void;
   }) => ChatSession;
+  /** Ignore lines typed before an approval prompt appeared. Default: on when the input is a terminal. */
+  discardTypeahead?: boolean;
+  /** Send lines that arrive together (a paste) as one message. Default: on when the input is a terminal. */
+  joinPastedLines?: boolean;
 }): Promise<void> {
   const lines = lineReader(opts.input);
   const say = (text: string) => opts.output.write(text);
   const note = (text: string) => opts.errOutput.write(text);
   const errIsTerminal = (opts.errOutput as { isTTY?: boolean }).isTTY === true;
   const inputIsTerminal = (opts.input as { isTTY?: boolean }).isTTY === true;
+  const discardTypeahead = opts.discardTypeahead ?? inputIsTerminal;
+  const joinPastedLines = opts.joinPastedLines ?? inputIsTerminal;
+
+  // The next message: one line, or a pasted block whose lines arrived together.
+  const nextMessage = async (): Promise<string | null> => {
+    const first = await lines.next();
+    if (first === null || !joinPastedLines) return first;
+    await new Promise((resolve) => setTimeout(resolve, PASTE_WINDOW_MS));
+    return [first, ...lines.drain()].join("\n");
+  };
 
   // While Claude works there is nothing to show but the time; on a terminal, keep one line ticking.
   let ticker: NodeJS.Timeout | undefined;
@@ -101,6 +126,9 @@ export async function runRepl(opts: {
 
   const session = opts.createSession({
     approve: async (command) => {
+      // Only input that arrives after the question counts as its answer: a key pressed earlier
+      // was not an answer to a command the user had not seen.
+      if (discardTypeahead) lines.drain();
       note(`Run this command? ${printable(command)}  [y]es / [n]o / [a]lways: `);
       const answer = (await lines.next())?.trim().toLowerCase();
       if (!inputIsTerminal) note("\n");
@@ -123,7 +151,7 @@ export async function runRepl(opts: {
 
   for (;;) {
     say("> ");
-    const line = await lines.next();
+    const line = await nextMessage();
     if (line === null) {
       say("\n");
       return;
@@ -132,7 +160,9 @@ export async function runRepl(opts: {
     if (text === "") continue;
     if (text === "/exit" || text === "/quit") return;
     try {
-      if (text === "/help") note(HELP);
+      // A pasted block is never a command, even when its first line starts with a slash.
+      if (text.includes("\n")) show(await session.send(text));
+      else if (text === "/help") note(HELP);
       else if (text === "/clear") {
         session.clear();
         note("conversation cleared\n");
