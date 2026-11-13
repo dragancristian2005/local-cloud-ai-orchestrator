@@ -6,7 +6,7 @@ export type CommandVerdict = { decision: "allow" } | { decision: "ask" } | { dec
 // `git`, optional global options, then the subcommand. Global options that take a value
 // (`-C <path>`, `--work-tree <path>`, `--git-dir=<path>`...) are skipped together with it, so
 // the value is not mistaken for the subcommand.
-const GIT_VALUE_OPTIONS = "-C|-c|--work-tree|--git-dir|--namespace|--exec-path";
+const GIT_VALUE_OPTIONS = "-C|-c|--work-tree|--git-dir|--namespace|--exec-path|--config-env|--super-prefix|--attr-source";
 function git(subcommand: string): RegExp {
   return new RegExp(`\\bgit\\s+(?:(?:${GIT_VALUE_OPTIONS})(?:=\\S+|\\s+\\S+)\\s+|-\\S+\\s+)*(?:${subcommand})\\b`, "i");
 }
@@ -36,6 +36,9 @@ const ALWAYS_REFUSED: { pattern: RegExp; reason: string }[] = [
   { pattern: new RegExp(`${git("reset").source}${SAME_COMMAND}--ha(r(d)?)?\\b`), reason: "git reset --hard is not allowed" },
   { pattern: git("clean"), reason: "git clean is not allowed" },
   { pattern: git("push"), reason: "git push is not allowed" },
+  // An alias defined on the command line can name any subcommand, or a shell command, so the
+  // rules here could not tell what would run. --config-env can define one out of sight.
+  { pattern: new RegExp(`\\bgit\\b${SAME_COMMAND}\\s(-c\\s*alias\\.|--config-env)`), reason: "git aliases and --config-env on the command line are not allowed" },
   { pattern: new RegExp(`${git("checkout").source}${SAME_COMMAND}\\s(-f|--force|--|\\.)(?=\\s|$)`), reason: "discarding changes is not allowed" },
   { pattern: new RegExp(`${git("switch").source}${SAME_COMMAND}\\s(-f|--force|--discard-changes)(?=\\s|$)`), reason: "discarding changes is not allowed" },
   { pattern: git("restore"), reason: "discarding changes with git restore is not allowed" },
@@ -43,7 +46,9 @@ const ALWAYS_REFUSED: { pattern: RegExp; reason: string }[] = [
   { pattern: /\bsudo\b/, reason: "sudo is not allowed" },
   { pattern: /\|\s*(\S*\/)?(env\s+)?(sh|bash|zsh)\b/, reason: "piping into a shell is not allowed" },
   { pattern: new RegExp(`\\bch(mod|own)\\b${SAME_COMMAND}\\s(-[a-zA-Z]*R|--recursive)`), reason: "recursive chmod/chown is not allowed" },
-  { pattern: /(^|[;&|])\s*(mkfs\S*|shutdown|reboot)\b/, reason: "system commands are not allowed" },
+  // Only where a command starts (not as an argument: `grep -r shutdown src` is fine), allowing
+  // for a path in front and for wrappers that run their argument.
+  { pattern: /(^|[;&|(`])\s*((env|nohup|exec|time|command)\s+)*(\S*\/)?(mkfs\S*|shutdown|reboot|halt|poweroff)\b/, reason: "system commands are not allowed" },
   { pattern: new RegExp(`\\bdd\\b${SAME_COMMAND}\\bif=`), reason: "dd is not allowed" },
   { pattern: CREDENTIALS, reason: CREDENTIALS_REASON },
 ];

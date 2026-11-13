@@ -196,3 +196,17 @@ test("outside a git repository, git commands are never auto-approved", () => {
   assert.equal(outside("git status"), "ask");
   assert.equal(outside("ls src"), "allow");
 });
+
+test("system commands behind a path or a wrapper are refused", () => {
+  for (const command of ["/sbin/shutdown now", "ls && /usr/sbin/reboot", "env reboot", "nohup shutdown -h now", "echo $(reboot)", "exec /sbin/mkfs.ext4 /dev/sda", "halt", "poweroff"]) {
+    assert.equal(decide(command), "deny", command);
+  }
+  for (const command of ["cat docs/reboot.md", "grep -r halt src", "ls env/shutdown"]) assert.notEqual(decide(command), "deny", command);
+});
+
+test("a git alias or config taken from the command line cannot hide a refused subcommand", () => {
+  for (const command of ["git -c alias.p=push p", "git -c alias.x=!sh x", "git --config-env=alias.p=P p", "git --config-env alias.p=P push", "git --attr-source HEAD push", "git --super-prefix x/ push"]) {
+    assert.equal(decide(command), "deny", command);
+  }
+  for (const command of ["git -c core.quotepath=off status", "git -c color.ui=never log"]) assert.notEqual(decide(command), "deny", command);
+});
