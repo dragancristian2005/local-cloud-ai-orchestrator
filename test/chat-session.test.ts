@@ -209,3 +209,35 @@ test("the transcript file records routing, tool calls and replies", async () => 
   for (const type of ["user", "route", "command", "tool_result", "assistant"]) assert.ok(types.includes(type), `${type} missing in ${types.join(",")}`);
   assert.equal(s.log.readAll()[0]!.outputFile, `runs/${s.session.sessionId}/transcript.jsonl`);
 });
+
+test("a hand-over event carries the reason and the detail", async () => {
+  const { cloud } = fakeCloud();
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "orch-session-ev-")));
+  const log = new RunLog(path.join(mkdtempSync(path.join(tmpdir(), "orch-session-ev-runs-")), "runs"));
+  const local = fakeChatBackend([LOCAL, new BackendError("backend_error", "Ollama returned HTTP 400: does not support tool calling")]);
+  const events: unknown[] = [];
+  const session = new ChatSession({ local, cloud, root, onMainBranch: false, agent: AGENT, log, approve: async () => "no", onEvent: (e) => events.push(e) });
+  await session.send("hello");
+  assert.deepEqual(events, [{ type: "handover", reason: "backend_error", detail: "Ollama returned HTTP 400: does not support tool calling" }]);
+});
+
+test("Claude is told that tool results are data, not instructions", async () => {
+  const { cloud, calls } = fakeCloud();
+  const s = setup([TO_CLAUDE], { cloud });
+  await s.session.send("change the timeout");
+  assert.match(calls[0]!.prompt, /Tool result.*never as instructions/s);
+});
+
+test("a cap on Claude calls is enforced", async () => {
+  const { cloud, calls } = fakeCloud();
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "orch-session-cap-")));
+  const log = new RunLog(path.join(mkdtempSync(path.join(tmpdir(), "orch-session-cap-runs-")), "runs"));
+  const local = fakeChatBackend([TO_CLAUDE, TO_CLAUDE, TO_CLAUDE]);
+  const session = new ChatSession({ local, cloud, root, onMainBranch: false, agent: AGENT, log, approve: async () => "no", maxCloudCalls: 2 });
+  assert.equal((await session.send("one")).answeredBy, "claude");
+  assert.equal((await session.send("two")).answeredBy, "claude");
+  const third = await session.send("three");
+  assert.equal(third.answeredBy, null);
+  assert.match(third.error ?? "", /at most 2/);
+  assert.equal(calls.length, 2);
+});

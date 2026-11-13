@@ -1,5 +1,6 @@
 import { openSync, readSync, closeSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
+import { isSecretPath } from "./secrets.ts";
 
 /** A tool definition in the shape Ollama's /api/chat expects. */
 export interface ToolDefinition {
@@ -74,9 +75,9 @@ const MAX_MATCH_LINE_CHARS = 200;
 const MAX_SEARCH_FILE_BYTES = 1024 * 1024;
 const MAX_FILES_WALKED = 5000;
 const BINARY_SNIFF_BYTES = 8000;
-const SKIPPED_DIRS = new Set([".git", "node_modules"]);
-// Matched against lower-cased names: on macOS ".ENV" opens ".env".
-const SECRET_NAMES = [/^\.env(\..*)?$/, /\.pem$/, /\.key$/, /^id_rsa/, /^id_ed25519/, /^\.npmrc$/, /^\.netrc$/, /^credentials/];
+// Folders a search does not walk into: dependencies, virtual environments and build output.
+// Naming one of them as "path" still searches it.
+const SKIPPED_DIRS = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", "target", "dist", ".next", ".cache"]);
 
 /** A problem the model can act on. The agent loop turns it into an "error: ..." tool result. */
 export class ToolError extends Error {
@@ -109,14 +110,11 @@ export function resolveInside(root: string, requested: string): string {
 }
 
 function isSecret(root: string, absolute: string): boolean {
-  const parts = path.relative(realpathSync(root), absolute).toLowerCase().split(path.sep);
-  if (parts.includes(".git")) return true;
-  const base = parts.at(-1) ?? "";
-  return SECRET_NAMES.some((pattern) => pattern.test(base));
+  return isSecretPath(path.relative(realpathSync(root), absolute));
 }
 
 function refuseSecret(root: string, absolute: string, requested: string): void {
-  if (isSecret(root, absolute)) throw new ToolError(`refused: ${requested} looks like a secrets file`);
+  if (isSecret(root, absolute)) throw new ToolError(`refused: ${requested} is a secrets file or folder`);
 }
 
 function isBinary(file: string): boolean {
@@ -145,7 +143,10 @@ export function readFileTool(root: string, args: Record<string, unknown>): strin
   const requested = stringArg(args, "path");
   const file = resolveInside(root, requested);
   refuseSecret(root, file, requested);
-  if (statSync(file).isDirectory()) throw new ToolError(`${requested} is a directory: use list_dir`);
+  const stat = statSync(file);
+  if (stat.isDirectory()) throw new ToolError(`${requested} is a directory: use list_dir`);
+  // A pipe or a device would block the read, possibly forever.
+  if (!stat.isFile()) throw new ToolError(`${requested} is not a regular file`);
   if (isBinary(file)) throw new ToolError("binary file");
 
   const lines = readFileSync(file, "utf8").split("\n");
@@ -176,6 +177,7 @@ export function readFileTool(root: string, args: Record<string, unknown>): strin
 export function listDirTool(root: string, args: Record<string, unknown>): string {
   const requested = stringArg(args, "path", ".");
   const dir = resolveInside(root, requested);
+  refuseSecret(root, dir, requested);
   if (!statSync(dir).isDirectory()) throw new ToolError(`${requested} is a file: use read_file`);
   const names = readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.name.toLowerCase() !== ".git")
@@ -196,9 +198,11 @@ export function searchTool(root: string, args: Record<string, unknown>): string 
   const matches: string[] = [];
   let walked = 0;
   let stopped = false;
+  let gaveUp = false;
 
   const searchFile = (file: string) => {
-    if (isSecret(root, file) || statSync(file).size > MAX_SEARCH_FILE_BYTES || isBinary(file)) return;
+    const stat = statSync(file);
+    if (!stat.isFile() || isSecret(root, file) || stat.size > MAX_SEARCH_FILE_BYTES || isBinary(file)) return;
     const lines = readFileSync(file, "utf8").split("\n");
     for (let i = 0; i < lines.length; i++) {
       if (!lines[i]!.toLowerCase().includes(query)) continue;
@@ -213,7 +217,11 @@ export function searchTool(root: string, args: Record<string, unknown>): string 
   const walk = (dir: string) => {
     const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
-      if (stopped || walked >= MAX_FILES_WALKED) return;
+      if (stopped) return;
+      if (walked >= MAX_FILES_WALKED) {
+        gaveUp = true;
+        return;
+      }
       const full = path.join(dir, entry.name);
       // Links are not followed: one that points outside the repository must not be searched.
       if (entry.isSymbolicLink()) continue;
@@ -229,7 +237,9 @@ export function searchTool(root: string, args: Record<string, unknown>): string 
   if (statSync(start).isDirectory()) walk(start);
   else searchFile(start);
 
-  if (matches.length === 0) return "no matches";
+  if (matches.length === 0) matches.push("no matches");
   if (stopped) matches.push(`[stopped after ${MAX_MATCHES} matches]`);
+  // Without this note "no matches" would be a false statement about files that were never read.
+  else if (gaveUp) matches.push(`[stopped after ${MAX_FILES_WALKED} files; narrow the search with "path"]`);
   return matches.join("\n");
 }

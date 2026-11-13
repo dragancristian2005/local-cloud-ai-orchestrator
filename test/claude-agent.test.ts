@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { BILLING_ENV_VARS, CHAT_TOOLS, ClaudeCliBackend } from "../src/backends/claude-cli.ts";
@@ -94,4 +94,35 @@ test("run is unchanged: no tools, no permission flag", async () => {
   await backend().run({ prompt: "abc", timeoutMs: 5000 });
   const { args } = JSON.parse(readFileSync(argsFile, "utf8")) as { args: string[] };
   assert.deepEqual(args, ["-p", "--output-format", "json", "--tools", "", "--no-session-persistence", "--safe-mode"]);
+});
+
+function projectWithSettings(file: string, content: string): string {
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "orch-claude-settings-")));
+  mkdirSync(path.join(dir, ".claude"));
+  writeFileSync(path.join(dir, ".claude", file), content);
+  return dir;
+}
+
+test("runAgent refuses a project whose Claude settings would change who is billed", async () => {
+  const cases: [string, string, RegExp][] = [
+    ["settings.json", JSON.stringify({ env: { ANTHROPIC_API_KEY: "secret-value-123" } }), /ANTHROPIC_API_KEY/],
+    ["settings.local.json", JSON.stringify({ env: { CLAUDE_CODE_USE_BEDROCK: "1" } }), /CLAUDE_CODE_USE_BEDROCK/],
+    ["settings.json", JSON.stringify({ apiKeyHelper: "/bin/print-key" }), /apiKeyHelper/],
+    ["settings.json", "{ not json", /cannot be read/],
+  ];
+  for (const [file, content, expected] of cases) {
+    const dir = projectWithSettings(file, content);
+    const traceFile = (process.env.FAKE_CLAUDE_TRACE = scratch("trace.txt"));
+    await assert.rejects(
+      backend().runAgent({ prompt: "abc", cwd: dir, timeoutMs: 5000 }),
+      (err: unknown) => err instanceof BackendError && err.reason === "backend_error" && expected.test(err.message) && err.message.includes(file) && !err.message.includes("secret-value-123"),
+      `${file}: ${content}`,
+    );
+    assert.equal(existsSync(traceFile), false);
+  }
+});
+
+test("runAgent accepts a project with ordinary Claude settings", async () => {
+  const dir = projectWithSettings("settings.json", JSON.stringify({ permissions: { allow: ["Read"] }, env: { NODE_ENV: "test" } }));
+  assert.equal((await backend().runAgent({ prompt: "abc", cwd: dir, timeoutMs: 5000 })).text, "cba");
 });

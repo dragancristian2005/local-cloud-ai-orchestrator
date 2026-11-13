@@ -239,3 +239,47 @@ test("the main-branch rule is checked for each command, not once", async () => {
   assert.equal(results[0], "the user declined to run this command");
   assert.match(results[1]!, /^refused: commits are not made on the main branch/);
 });
+
+test("at most eight tool calls from one reply are run", async () => {
+  const calls = Array.from({ length: 12 }, (_, i) => ({ name: "search", arguments: { query: `term${i}`, path: "src" } }));
+  const s = setup([{ toolCalls: calls }, { content: "ok" }]);
+  await s.run();
+  const results = s.messages.filter((m) => m.role === "tool").map((m) => m.content);
+  assert.equal(results.length, 12, "every call still gets a result");
+  assert.equal(results.filter((r) => r === "no matches").length, 8);
+  assert.equal(results.filter((r) => /^not run: too many tool calls/.test(r)).length, 4);
+});
+
+test("several results from one reply share the room, so the model still sees all of them", async () => {
+  const calls = Array.from({ length: 4 }, (_, i) => ({ name: "search", arguments: { query: "needle", path: `note-${i}.txt` } }));
+  const many = Array.from({ length: 4 }, () => ({ name: "search", arguments: { query: "needle" } }));
+  const s = setup([{ toolCalls: [...calls, ...many.map((c, i) => ({ ...c, arguments: { query: "needle", path: i === 0 ? "." : `note-${i + 10}.txt` } }))] }, { content: "ok" }]);
+  await s.run();
+  const sizes = s.messages.filter((m) => m.role === "tool").map((m) => m.content.length);
+  const total = sizes.reduce((a, b) => a + b, 0);
+  assert.ok(total <= 5000 * 3 * 0.6 + 100, `results total ${total} characters`);
+  const request = s.backend.requests[1]!.messages;
+  assert.equal(request.filter((m) => m.role === "tool").length, 8, "the group was not dropped from what the model sees");
+});
+
+test("outside a git repository an allow-listed git command asks first", async () => {
+  const root = makeRoot();
+  const backend = fakeChatBackend([call("run_command", { command: "git status" }), { content: "ok" }]);
+  const messages: ChatMessage[] = [{ role: "user", content: "status?" }];
+  const asked: string[] = [];
+  await runAgentTurn({
+    backend, messages, root, maxSteps: 8, historyTokenBudget: 5000, commandTimeoutMs: 5000,
+    allowCommands: ["git status"], sessionAllowed: new Set(), onMainBranch: false, gitRepository: async () => false,
+    approve: async (command) => {
+      asked.push(command);
+      return "no";
+    },
+  });
+  assert.deepEqual(asked, ["git status"]);
+});
+
+test("a search is described by what was searched for", async () => {
+  const s = setup([call("search", { query: "clamp", path: "src" }), call("list_dir", { path: "src" }), { content: "ok" }]);
+  await s.run();
+  assert.deepEqual(s.events.map((e) => e.type === "tool" && e.summary), ['search "clamp" in src', "list_dir src"]);
+});

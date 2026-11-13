@@ -67,3 +67,16 @@ test("runCommand does not wait for input", async () => {
   assert.equal(result.timedOut, false);
   assert.match(result.output, /eof/);
 });
+
+test("runCommand never rejects, even for a command the system cannot start", async () => {
+  const result = await runCommand("echo a\u0000b", { cwd, timeoutMs: 5000 });
+  assert.equal(result.ok, false);
+});
+
+test("runCommand returns at the timeout even when a detached child keeps the output open", async () => {
+  const detached = `node -e "require('child_process').spawn('node', ['-e', 'setTimeout(() => {}, 6000)'], { detached: true, stdio: 'inherit' }).unref(); setInterval(() => {}, 1000)"`;
+  const started = Date.now();
+  const result = await runCommand(detached, { cwd, timeoutMs: 300 });
+  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+  assert.equal(result.timedOut, true);
+});

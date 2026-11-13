@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -153,4 +154,41 @@ test("search stops at 40 matches and refuses to leave the repository", () => {
 test("search cuts long matching lines", () => {
   const result = searchTool(root, { query: "yyyy", path: "huge-line.txt" });
   assert.ok(result.length < 400, `got ${result.length}`);
+});
+
+test("list_dir refuses git internals and other secrets folders", () => {
+  mkdirSync(path.join(root, ".git/refs"), { recursive: true });
+  mkdirSync(path.join(root, ".ssh"), { recursive: true });
+  for (const dir of [".git", ".git/refs", "Case/.GIT", ".ssh"]) refuses(() => listDirTool(root, { path: dir }), /refused/);
+});
+
+test("more secrets names are refused: key folders, secrets files, backups of keys", () => {
+  mkdirSync(path.join(root, ".aws"), { recursive: true });
+  writeFileSync(path.join(root, ".ssh/config"), "Host x\n");
+  writeFileSync(path.join(root, ".aws/config"), "[default]\n");
+  writeFileSync(path.join(root, "secrets.json"), "{}\n");
+  writeFileSync(path.join(root, "key.pem.bak"), "key\n");
+  for (const file of [".ssh/config", ".aws/config", "secrets.json", "key.pem.bak"]) refuses(() => readFileTool(root, { path: file }), /refused/);
+});
+
+test("read_file refuses a named pipe instead of waiting on it forever", () => {
+  const fifo = path.join(root, "pipe");
+  execFileSync("mkfifo", [fifo]);
+  refuses(() => readFileTool(root, { path: "pipe" }), /not a regular file/);
+  assert.equal(searchTool(root, { query: "anything-not-there-xyz", path: "src" }), "no matches");
+});
+
+test("search skips dependency and build folders, and says when it stopped early", () => {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), "orch-search-")));
+  mkdirSync(path.join(base, ".venv/lib"), { recursive: true });
+  mkdirSync(path.join(base, "zz"), { recursive: true });
+  writeFileSync(path.join(base, ".venv/lib/dep.py"), "compute_total = 1\n");
+  writeFileSync(path.join(base, "zz/app.py"), "def compute_total(): pass\n");
+  assert.equal(searchTool(base, { query: "compute_total" }), "zz/app.py:1: def compute_total(): pass");
+
+  mkdirSync(path.join(base, "bulk"));
+  for (let i = 0; i < 5001; i++) writeFileSync(path.join(base, "bulk", `f${i}.txt`), "");
+  const stopped = searchTool(base, { query: "compute_total" });
+  assert.match(stopped, /\[stopped after 5000 files; narrow the search with "path"\]$/);
+  assert.equal(searchTool(base, { query: "compute_total", path: "zz" }), "zz/app.py:1: def compute_total(): pass");
 });

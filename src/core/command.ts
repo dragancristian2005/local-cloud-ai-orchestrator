@@ -10,6 +10,7 @@ export interface CommandResult {
 }
 
 const MAX_OUTPUT_CHARS = 20_000;
+const KILL_GRACE_MS = 500;
 
 /**
  * Run one shell command line and wait for it. Never rejects: a command that cannot start, fails,
@@ -28,15 +29,26 @@ export function runCommand(
     let settled = false;
 
     // Its own process group, so a timeout takes the children with it and not only the shell.
-    const child = spawn(command, { shell: true, cwd: opts.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command, { shell: true, cwd: opts.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (err) {
+      // For example a NUL byte in the command line.
+      const message = err instanceof Error ? err.message : String(err);
+      resolve({ ok: false, exitCode: null, timedOut: false, output: `cannot start the command: ${message}\n` });
+      return;
+    }
 
     const killGroup = () => {
-      if (child.pid === undefined) return;
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // already gone
+      if (child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          // already gone
+        }
       }
+      // A child that left the group can keep the output open. Do not wait for it.
+      setTimeout(() => finish(null), KILL_GRACE_MS).unref();
     };
     const timer = setTimeout(() => {
       timedOut = true;
@@ -58,8 +70,8 @@ export function runCommand(
     const collect = (chunk: string) => {
       output = (output + chunk).slice(-MAX_OUTPUT_CHARS);
     };
-    child.stdout.setEncoding("utf8").on("data", collect);
-    child.stderr.setEncoding("utf8").on("data", collect);
+    child.stdout?.setEncoding("utf8").on("data", collect);
+    child.stderr?.setEncoding("utf8").on("data", collect);
     child.on("error", (err) => {
       collect(`cannot start the command: ${err.message}\n`);
       finish(null);
