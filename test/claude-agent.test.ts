@@ -126,3 +126,16 @@ test("runAgent accepts a project with ordinary Claude settings", async () => {
   const dir = projectWithSettings("settings.json", JSON.stringify({ permissions: { allow: ["Read"] }, env: { NODE_ENV: "test" } }));
   assert.equal((await backend().runAgent({ prompt: "abc", cwd: dir, timeoutMs: 5000 })).text, "cba");
 });
+
+test("the settings are checked when claude is about to start, not when the call was queued", async () => {
+  const dir = projectWithSettings("settings.json", JSON.stringify({ permissions: { allow: ["Read"] } }));
+  const traceFile = (process.env.FAKE_CLAUDE_TRACE = scratch("trace.txt"));
+  const b = backend();
+  const first = b.runAgent({ prompt: "abc", cwd: repo, timeoutMs: 5000 });
+  const second = b.runAgent({ prompt: "abc", cwd: dir, timeoutMs: 5000 });
+  // While the first call is still running, the project's settings change.
+  writeFileSync(path.join(dir, ".claude", "settings.json"), JSON.stringify({ env: { ANTHROPIC_API_KEY: "x" } }));
+  await assert.rejects(second, (err: unknown) => err instanceof BackendError && /ANTHROPIC_API_KEY/.test(err.message));
+  await first;
+  assert.equal(readFileSync(traceFile, "utf8").split("\n").filter((line) => line.startsWith("start")).length, 1);
+});

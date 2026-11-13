@@ -124,13 +124,16 @@ export class ClaudeCliBackend implements Backend {
   /** A headless call inside a repository, with the read-only chat tools. */
   runAgent(req: { prompt: string; cwd: string; timeoutMs: number }): Promise<BackendResult> {
     // Here claude runs inside the user's project, whose own settings could change who is billed.
-    const problem = projectBillingProblem(req.cwd);
-    if (problem !== null) return Promise.reject(new BackendError("backend_error", problem));
-    return this.enqueue(CHAT_ARGS, req);
+    // They are read when the call's turn comes, right before claude starts: a call can wait in
+    // the queue, and the files may change meanwhile.
+    return this.enqueue(CHAT_ARGS, req, () => {
+      const problem = projectBillingProblem(req.cwd);
+      if (problem !== null) throw new BackendError("backend_error", problem);
+    });
   }
 
   /** Every call goes through here: the billing check first, then the one-at-a-time queue. */
-  private enqueue(baseArgs: string[], req: BackendRequest): Promise<BackendResult> {
+  private enqueue(baseArgs: string[], req: BackendRequest, checkBeforeStart?: () => void): Promise<BackendResult> {
     const blocking = BILLING_ENV_VARS.find((name) => (process.env[name] ?? "") !== "");
     if (blocking !== undefined) {
       return Promise.reject(
@@ -140,7 +143,10 @@ export class ClaudeCliBackend implements Backend {
         ),
       );
     }
-    const next = queue.then(() => this.runNow(baseArgs, req));
+    const next = queue.then(() => {
+      checkBeforeStart?.();
+      return this.runNow(baseArgs, req);
+    });
     queue = next.catch(() => {});
     return next;
   }
