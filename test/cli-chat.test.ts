@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
@@ -7,6 +8,7 @@ import { closedPortUrl, scriptedChat, startFakeOllama, toolCall } from "./helper
 import type { ScriptedReply } from "./helpers/fake-ollama.ts";
 import { fakeClaudeEnv, runCli, twoTierConfig, writeTempConfig } from "./helpers/run-cli.ts";
 import { makeTempRepo } from "./helpers/temp-repo.ts";
+import { BILLING_ENV_VARS } from "../src/backends/claude-cli.ts";
 
 const SOURCE = { "src/math.js": "export function clamp(n) {\n  return n;\n}\n" };
 const LOCAL: ScriptedReply = { content: "LOCAL" };
@@ -129,4 +131,62 @@ test("orch with no arguments and piped input still prints the usage", async () =
   const result = await runCli([], {}, "");
   assert.equal(result.code, 2);
   assert.match(result.stderr, /usage: orch/i);
+});
+
+test("piped input may hand over to Claude at most three times", async () => {
+  const env = fakeClaudeEnv({ FAKE_CLAUDE_REPLY: "Answer." });
+  const toClaude: ScriptedReply = { content: "CLAUDE" };
+  const { result } = await chat([toClaude, toClaude, toClaude, toClaude], ["one", "two", "three", "four", "/exit"], env);
+  assert.equal(result.code, 0, result.stderr);
+  const starts = readFileSync(env.FAKE_CLAUDE_TRACE!, "utf8").split("\n").filter((line) => line.startsWith("start"));
+  assert.equal(starts.length, 3);
+  assert.match(result.stderr, /at most 3/);
+});
+
+test("Ctrl-C stops an approved command", async () => {
+  const command = `node -e "require('fs').writeFileSync('pid.txt', String(process.pid)); setInterval(() => {}, 1000)"`;
+  const server = await startFakeOllama(scriptedChat([LOCAL, { tool_calls: [toolCall("run_command", { command })] }, { content: "unreachable" }]));
+  let commandPid: number | undefined;
+  try {
+    const repo = realpathSync(await makeTempRepo(SOURCE, { stage: true }));
+    const { configPath } = writeTempConfig(twoTierConfig(server.url, ["chat"]));
+    const env = { ...process.env };
+    for (const key of BILLING_ENV_VARS) delete env[key];
+    const cli = spawn(process.execPath, [path.resolve(import.meta.dirname, "../src/cli.ts"), "chat", "--repo", repo, "--config", configPath], { env, stdio: ["pipe", "ignore", "ignore"] });
+    const exited = new Promise<number | null>((resolve) => cli.on("close", (code) => resolve(code)));
+    cli.stdin.write("go\ny\n");
+
+    const pidFile = path.join(repo, "pid.txt");
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && !(existsSync(pidFile) && readFileSync(pidFile, "utf8") !== "")) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    commandPid = Number(readFileSync(pidFile, "utf8"));
+    assert.ok(commandPid > 0, "the command started");
+
+    cli.kill("SIGINT");
+    assert.equal(await exited, 130);
+
+    const isGone = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    const until = Date.now() + 2000;
+    while (Date.now() < until && !isGone(commandPid)) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(isGone(commandPid), true, "the command is still running");
+  } finally {
+    // Whatever the outcome, the test does not leave the command behind.
+    if (commandPid !== undefined) {
+      try {
+        process.kill(commandPid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+    }
+    await server.close();
+  }
 });

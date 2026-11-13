@@ -16,7 +16,7 @@ import { BackendError, ConfigError, InputError } from "./core/types.ts";
 import { formatTable, summarize } from "./log/report.ts";
 import { RunLog } from "./log/run-log.ts";
 import { taskModules } from "./tasks/task.ts";
-import { currentBranch } from "./workspace/git.ts";
+import { currentBranch, isWorkTree } from "./workspace/git.ts";
 
 const USAGE = `usage: orch <command> [options]
 
@@ -186,6 +186,8 @@ function reportCommand(args: string[]): number {
   return 0;
 }
 
+const MAX_CLOUD_CALLS_PIPED = 3;
+
 async function chatCommand(args: string[]): Promise<number> {
   const { values } = parse({
     args,
@@ -234,6 +236,15 @@ async function chatCommand(args: string[]): Promise<number> {
       `\nType /help for commands, /exit to leave.\n`,
   );
   const log = new RunLog(config.runsDir);
+  // Ctrl-C leaves the chat. Aborting first stops a command that is running: it is in its own
+  // process group, so it would otherwise outlive the chat.
+  const stop = new AbortController();
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      stop.abort();
+      process.exit(130);
+    });
+  }
   await runRepl({
     input: process.stdin,
     output: process.stdout,
@@ -245,8 +256,13 @@ async function chatCommand(args: string[]): Promise<number> {
         root,
         // Asked before every command: the branch can change while the chat is open.
         onMainBranch: async () => ["main", "master"].includes((await currentBranch(root)) ?? ""),
+        // Outside a repository git's read commands can reach any file, so none is auto-approved.
+        gitRepository: () => isWorkTree(root),
         agent: config.agent,
         log,
+        signal: stop.signal,
+        // Piped input is not a person at a keyboard: no unattended runs against the subscription.
+        maxCloudCalls: process.stdin.isTTY ? undefined : MAX_CLOUD_CALLS_PIPED,
         ...hooks,
       }),
   });

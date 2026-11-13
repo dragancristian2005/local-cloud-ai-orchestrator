@@ -48,3 +48,13 @@ export async function currentBranch(dir: string): Promise<string | null> {
     return null;
   }
 }
+
+/** True when the folder is inside a git work tree. */
+export async function isWorkTree(dir: string): Promise<boolean> {
+  try {
+    await git(dir, ["rev-parse", "--is-inside-work-tree"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
