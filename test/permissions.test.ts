@@ -115,3 +115,33 @@ test("refusals ignore letter case, because macOS file names do", () => {
     assert.equal(decide(command), "deny", command);
   }
 });
+
+test("quotes and wildcards are never auto-approved, because the shell would rewrite the arguments", () => {
+  for (const command of [`ls "/etc"`, "ls '/etc'", `git diff -- "../x"`, "ls *", "ls src/*.js", "git log -- [a]bc", "ls ?", "ls src/{a,b}", "ls !$", "ls # comment"]) {
+    assert.equal(decide(command), "ask", command);
+  }
+});
+
+test("abbreviated forms of the unsafe git options are not auto-approved", () => {
+  for (const command of ["git diff --no-ind a b", "git diff --no-i a b", "git diff --out=x", "git diff --o x", "git diff --ext", "git log --textc -p", "git diff --outpu x"]) {
+    assert.equal(decide(command), "ask", command);
+  }
+});
+
+test("a path attached to a short option is checked too", () => {
+  for (const command of ["git diff -O/etc/passwd", "git diff -O~/order", "git diff -O../order"]) {
+    assert.equal(decide(command), "ask", command);
+  }
+});
+
+test("options that merely share a first letter with an unsafe one are still auto-approved", () => {
+  for (const command of ["git log --oneline -5", "git diff --stat", "git status --short", "ls -la src", "git log --no-merges", "git diff --name-only", "git log --graph --all"]) {
+    assert.equal(decide(command), "allow", command);
+  }
+});
+
+test("a secrets file is refused however it is reached", () => {
+  for (const command of ["git diff HEAD:.env", "git show HEAD:.env", "git log -p -- .env", "cat ./.env", `cat "a/.env"`, "cat x:.env.local", "git show main:config/.env.production", "cat<.env"]) {
+    assert.equal(decide(command), "deny", command);
+  }
+});

@@ -12,7 +12,7 @@ const CREDENTIALS = new RegExp(
     "\\.claude\\b", "\\.credentials", "\\.ssh\\b", "\\.aws\\b", "\\.gnupg\\b", "\\.kube\\b", "\\.docker\\b",
     "\\.config\\/gh\\b", "\\.netrc\\b", "\\.npmrc\\b", "\\.pypirc\\b", "\\bid_(rsa|ed25519)\\b", "security\\s+find-",
     // ".env" as a file name, not "process.env" or "environment"
-    "(^|[\\s/\"'=])\\.env(\\.[\\w.-]+)?(?=$|[\\s\"'])",
+    "(^|[^\\w.])\\.env(\\.[\\w.-]+)?(?!\\w)",
   ].join("|"),
   "i",
 );
@@ -40,22 +40,31 @@ const ALWAYS_REFUSED: { pattern: RegExp; reason: string }[] = [
   { pattern: CREDENTIALS, reason: "commands that touch credentials or secrets files are not allowed" },
 ];
 
-// Arguments that take an allow-listed command out of its harmless form: a path outside the
-// repository, or an option that reads other files, writes one, or runs a configured helper.
+// What takes an allow-listed command out of its harmless form: a path outside the repository, or
+// an option that reads other files, writes one, or runs a configured helper.
 const LEAVES_REPOSITORY = /^[/~]|(^|\/)\.\.(\/|$)/;
-const UNSAFE_OPTION = /^--?(no-index|output|ext-diff|textconv)(=|$)/;
+const UNSAFE_OPTIONS = ["no-index", "output", "ext-diff", "textconv"];
 
-function hasOnlySafeArguments(args: string[]): boolean {
-  return args.every((arg) => {
-    const value = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : arg;
-    return !UNSAFE_OPTION.test(arg) && !LEAVES_REPOSITORY.test(arg) && !LEAVES_REPOSITORY.test(value);
-  });
+function isSafeArgument(arg: string): boolean {
+  if (arg.startsWith("--")) {
+    // git accepts any unambiguous prefix of a long option ("--no-ind"), so a prefix counts as the option.
+    const name = arg.slice(2).split("=")[0]!;
+    if (name !== "" && UNSAFE_OPTIONS.some((unsafe) => unsafe.startsWith(name))) return false;
+    const value = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : "";
+    return !LEAVES_REPOSITORY.test(value);
+  }
+  // A short option may carry its value attached: "-O/etc/passwd".
+  if (arg.startsWith("-")) return !LEAVES_REPOSITORY.test(arg.slice(2));
+  const value = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : arg;
+  return !LEAVES_REPOSITORY.test(arg) && !LEAVES_REPOSITORY.test(value);
 }
 
 const COMMITS_ON_MAIN = git("commit|merge|rebase|cherry-pick|revert|am");
 
-// Any of these means the line is more than one plain command, so a prefix match proves nothing.
-const SHELL_OPERATORS = /[;&|><$`(){}\\\n]/;
+// Characters the shell gives a meaning to. With any of them the words the program receives are
+// not the words on the line (quotes hide a path, a wildcard expands to one), so nothing can be
+// concluded from the text and the user is asked.
+const SHELL_SYNTAX = /[;&|><$`(){}\\\n"'*?[\]!#]/;
 
 /**
  * Decide whether a command may run: refused outright, allowed without asking, or shown to the
@@ -76,9 +85,9 @@ export function classifyCommand(
   // Auto-approval is for the plain, harmless form of a listed command only: one command, with
   // arguments that stay inside the repository and cannot write or execute anything.
   const plain = command.trim();
-  if (SHELL_OPERATORS.test(plain)) return { decision: "ask" };
+  if (SHELL_SYNTAX.test(plain)) return { decision: "ask" };
   const entry = opts.allowCommands.find((listed) => plain === listed || plain.startsWith(`${listed} `));
   if (entry === undefined) return { decision: "ask" };
   const args = plain.slice(entry.length).trim().split(/\s+/).filter((arg) => arg !== "");
-  return hasOnlySafeArguments(args) ? { decision: "allow" } : { decision: "ask" };
+  return args.every(isSafeArgument) ? { decision: "allow" } : { decision: "ask" };
 }
