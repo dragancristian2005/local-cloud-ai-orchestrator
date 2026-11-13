@@ -76,6 +76,20 @@ test("read_file refuses secrets files and git internals", () => {
   }
 });
 
+test("the secrets check ignores letter case, because macOS file names do", () => {
+  // On a case-insensitive disk ".ENV" opens ".env". Refuse by name whatever the case.
+  mkdirSync(path.join(root, "Case/.GIT"), { recursive: true });
+  writeFileSync(path.join(root, "Case/.ENV"), "TOKEN=x\n");
+  writeFileSync(path.join(root, "Case/Server.PEM"), "key\n");
+  writeFileSync(path.join(root, "Case/ID_RSA"), "key\n");
+  writeFileSync(path.join(root, "Case/.GIT/config"), "x\n");
+  for (const file of ["Case/.ENV", "Case/Server.PEM", "Case/ID_RSA", "Case/.GIT/config"]) {
+    refuses(() => readFileTool(root, { path: file }), /refused/);
+  }
+  assert.equal(searchTool(root, { query: "TOKEN=x" }), "no matches");
+  assert.ok(!listDirTool(root, { path: "Case" }).split("\n").includes(".GIT/"));
+});
+
 test("read_file caps a huge line", () => {
   const text = readFileTool(root, { path: "huge-line.txt" });
   assert.ok(text.length <= MAX_TOOL_RESULT_CHARS, `got ${text.length}`);

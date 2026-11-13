@@ -62,3 +62,29 @@ export async function closedPortUrl(): Promise<string> {
   await server.close();
   return server.url;
 }
+
+export type ScriptedReply = { content?: string; tool_calls?: unknown[] } | { status: number; error: string };
+
+/**
+ * A handler that answers /api/chat with the given replies, in order. /api/tags is healthy.
+ * A reply with `status` is sent as an HTTP error; running out of replies is a 500.
+ */
+export function scriptedChat(replies: ScriptedReply[]): FakeHandler {
+  const queue = [...replies];
+  return (req, _body, res) => {
+    if (req.url === "/api/tags") return json(res, 200, { models: [] });
+    const reply = queue.shift();
+    if (reply === undefined) return json(res, 500, { error: "the test scripted no further reply" });
+    if ("status" in reply) return json(res, reply.status, { error: reply.error });
+    json(res, 200, {
+      message: { role: "assistant", content: reply.content ?? "", ...(reply.tool_calls ? { tool_calls: reply.tool_calls } : {}) },
+      prompt_eval_count: 50,
+      eval_count: 5,
+    });
+  };
+}
+
+/** A tool call as Ollama sends it. */
+export function toolCall(name: string, args: Record<string, unknown>): unknown {
+  return { function: { name, arguments: args } };
+}

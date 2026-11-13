@@ -77,3 +77,41 @@ test("harmless look-alikes are not refused", () => {
     assert.notEqual(decide(command), "deny", command);
   }
 });
+
+test("an allow-listed command is not auto-approved when an argument leaves the repository", () => {
+  for (const command of ["ls /", "ls /etc", "ls ~", "ls ~/Documents", "ls ../other", "ls src/../../x", "git diff -- /etc/passwd", "git log -p ../other/file.js", "ls ..", "git diff --stat=10 ~/notes"]) {
+    assert.equal(decide(command), "ask", command);
+  }
+});
+
+test("an allow-listed command is not auto-approved with an option that reads elsewhere, writes or runs a helper", () => {
+  for (const command of ["git diff --no-index a.txt b.txt", "git diff --ext-diff", "git log --textconv -p", "git diff --output x.patch", "git diff --output=x.patch", "git log --ext-diff -p"]) {
+    assert.equal(decide(command), "ask", command);
+  }
+});
+
+test("ordinary arguments are still auto-approved", () => {
+  for (const command of ["ls -la src", "git diff --stat", "git log --oneline -5", "git diff HEAD~1 -- src/a.ts", "git log -p src/math.js", "git status --short", "ls src/agent"]) {
+    assert.equal(decide(command), "allow", command);
+  }
+});
+
+test("commands that name a credentials or secrets file are refused", () => {
+  const refused = [
+    "cat ~/.aws/credentials", "cat .env", "cat config/.env.production", "cat ~/.netrc", "ls ~/.gnupg", "cat ~/.config/gh/hosts.yml",
+    "cat .npmrc", "cat ~/.kube/config", "cat ~/.docker/config.json", "cat keys/id_rsa", "cat ~/.pypirc", "git diff --no-index ~/.aws/credentials /dev/null",
+  ];
+  for (const command of refused) assert.equal(decide(command), "deny", command);
+});
+
+test("mentioning process.env or an env-like word is not a refusal", () => {
+  for (const command of [`node -e "console.log(process.env.CI)"`, "printenv PATH", "npm run build --environment=dev", "cat docs/environment.md"]) {
+    assert.notEqual(decide(command), "deny", command);
+  }
+});
+
+test("refusals ignore letter case, because macOS file names do", () => {
+  for (const command of ["RM -rf build", "Git push", "GIT RESET --HARD", "Sudo ls", "cat .ENV", "cat ~/.AWS/credentials", "cat ~/.SSH/ID_RSA", "cat ~/.Claude/.credentials.json"]) {
+    assert.equal(decide(command), "deny", command);
+  }
+});

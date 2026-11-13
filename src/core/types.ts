@@ -1,3 +1,6 @@
+import type { ChatMessage, ToolCall } from "../agent/messages.ts";
+import type { ToolDefinition } from "../agent/tools.ts";
+
 export type FallbackReason = "pc_unreachable" | "timeout" | "verify_failed" | "backend_error";
 export type VerifyStatus = "pass" | "fail" | "skipped";
 
@@ -95,4 +98,31 @@ export interface AttemptRecord {
   outputFile: string | null;
   mode: "run" | "eval";
   taskId: string | null;
+}
+
+export interface ChatRequest {
+  messages: ChatMessage[];
+  /** Tools the model may ask for. Empty means a plain exchange. */
+  tools: ToolDefinition[];
+  timeoutMs: number;
+}
+
+export interface ChatResult {
+  content: string;
+  /** Empty when the model answered instead of asking for a tool. */
+  toolCalls: ToolCall[];
+  durationMs: number;
+  promptTokens?: number;
+  outputTokens?: number;
+}
+
+/** A local backend that can hold a conversation and ask for tools. */
+export interface ChatBackend {
+  id: string;
+  name: string;
+  model: string;
+  kind: "local";
+  timeoutMs: number;
+  healthCheck(): Promise<boolean>;
+  chat(req: ChatRequest): Promise<ChatResult>;
 }

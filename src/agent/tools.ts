@@ -75,7 +75,8 @@ const MAX_SEARCH_FILE_BYTES = 1024 * 1024;
 const MAX_FILES_WALKED = 5000;
 const BINARY_SNIFF_BYTES = 8000;
 const SKIPPED_DIRS = new Set([".git", "node_modules"]);
-const SECRET_NAMES = [/^\.env(\..*)?$/, /\.pem$/, /\.key$/, /^id_rsa/, /^id_ed25519/, /^\.npmrc$/, /^\.netrc$/, /^credentials/i];
+// Matched against lower-cased names: on macOS ".ENV" opens ".env".
+const SECRET_NAMES = [/^\.env(\..*)?$/, /\.pem$/, /\.key$/, /^id_rsa/, /^id_ed25519/, /^\.npmrc$/, /^\.netrc$/, /^credentials/];
 
 /** A problem the model can act on. The agent loop turns it into an "error: ..." tool result. */
 export class ToolError extends Error {
@@ -108,7 +109,7 @@ export function resolveInside(root: string, requested: string): string {
 }
 
 function isSecret(root: string, absolute: string): boolean {
-  const parts = path.relative(realpathSync(root), absolute).split(path.sep);
+  const parts = path.relative(realpathSync(root), absolute).toLowerCase().split(path.sep);
   if (parts.includes(".git")) return true;
   const base = parts.at(-1) ?? "";
   return SECRET_NAMES.some((pattern) => pattern.test(base));
@@ -177,7 +178,7 @@ export function listDirTool(root: string, args: Record<string, unknown>): string
   const dir = resolveInside(root, requested);
   if (!statSync(dir).isDirectory()) throw new ToolError(`${requested} is a file: use read_file`);
   const names = readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.name !== ".git")
+    .filter((entry) => entry.name.toLowerCase() !== ".git")
     .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
     .sort();
   if (names.length === 0) return "(empty directory)";
@@ -217,7 +218,7 @@ export function searchTool(root: string, args: Record<string, unknown>): string 
       // Links are not followed: one that points outside the repository must not be searched.
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
-        if (!SKIPPED_DIRS.has(entry.name)) walk(full);
+        if (!SKIPPED_DIRS.has(entry.name.toLowerCase())) walk(full);
       } else if (entry.isFile()) {
         walked++;
         searchFile(full);
