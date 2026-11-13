@@ -53,8 +53,9 @@ function isSafeArgument(arg: string): boolean {
     const value = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : "";
     return !LEAVES_REPOSITORY.test(value);
   }
-  // A short option may carry its value attached: "-O/etc/passwd".
-  if (arg.startsWith("-")) return !LEAVES_REPOSITORY.test(arg.slice(2));
+  // Short options can be bundled with a value attached anywhere ("-pO/etc/passwd"), so only the
+  // plain form is trusted: a dash followed by letters and digits.
+  if (arg.startsWith("-")) return /^-[A-Za-z0-9]+$/.test(arg);
   const value = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : arg;
   return !LEAVES_REPOSITORY.test(arg) && !LEAVES_REPOSITORY.test(value);
 }

@@ -34,9 +34,9 @@ orch eval --backend <name> [--model <name>] [--type <task type>] [--config <path
   --model    evaluate this model instead of the configured one
   --type     only the fixed tasks of this task type
 
-orch report [--mode run|eval] [--type <task type>] [--config <path>]
+orch report [--mode run|eval|chat] [--type <task type>] [--config <path>]
 
-  --mode     only records from "orch run" or only from "orch eval" (default: both)
+  --mode     run, eval or chat: only records of that kind (default: run and eval)
   --type     only records of this task type
 `;
 
@@ -157,7 +157,9 @@ function reportCommand(args: string[]): number {
     allowPositionals: false,
   });
   const mode = values.mode;
-  if (mode !== undefined && mode !== "run" && mode !== "eval") throw new UsageError(`--mode must be "run" or "eval"`);
+  if (mode !== undefined && mode !== "run" && mode !== "eval" && mode !== "chat") {
+    throw new UsageError(`--mode must be "run", "eval" or "chat"`);
+  }
   const config = loadConfig(values.config ? path.resolve(values.config) : undefined);
   const records = new RunLog(config.runsDir).readAll();
   if (records.length === 0) {

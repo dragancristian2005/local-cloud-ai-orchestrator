@@ -16,14 +16,15 @@ export interface ModelRow {
 }
 
 export interface ReportFilter {
-  mode?: "run" | "eval";
+  /** Without a mode, task runs and eval runs are shown and chat turns are left out. */
+  mode?: "run" | "eval" | "chat";
   taskType?: string;
 }
 
 export function summarize(records: AttemptRecord[], filter: ReportFilter = {}): ModelRow[] {
   const groups = new Map<string, AttemptRecord[]>();
   for (const rec of records) {
-    if (filter.mode !== undefined && rec.mode !== filter.mode) continue;
+    if (filter.mode === undefined ? rec.mode === "chat" : rec.mode !== filter.mode) continue;
     if (filter.taskType !== undefined && rec.taskType !== filter.taskType) continue;
     const key = `${rec.backend}\u0000${rec.model}`;
     const group = groups.get(key);
@@ -35,9 +36,11 @@ export function summarize(records: AttemptRecord[], filter: ReportFilter = {}): 
   for (const group of groups.values()) {
     const counted = group.filter((rec) => rec.fallbackReason !== "pc_unreachable");
     const passed = counted.filter((rec) => rec.fallbackReason === null).length;
-    const runRecords = counted.filter((rec) => rec.mode === "run");
-    const runs = new Set(runRecords.map((rec) => rec.runId));
-    const escalatedRuns = new Set(runRecords.filter((rec) => rec.escalated).map((rec) => rec.runId));
+    // The unit that can escalate: one `orch run`, or one turn of a chat session.
+    const unit = (rec: AttemptRecord) => (rec.mode === "chat" ? `${rec.runId}/${rec.taskId}` : rec.runId);
+    const runRecords = counted.filter((rec) => rec.mode !== "eval");
+    const runs = new Set(runRecords.map(unit));
+    const escalatedRuns = new Set(runRecords.filter((rec) => rec.escalated).map(unit));
     rows.push({
       backend: group[0]!.backend,
       model: group[0]!.model,

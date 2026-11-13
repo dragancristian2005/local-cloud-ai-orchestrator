@@ -1,7 +1,10 @@
 import type { ChatMessage, ToolCall } from "../agent/messages.ts";
 import type { ToolDefinition } from "../agent/tools.ts";
 
-export type FallbackReason = "pc_unreachable" | "timeout" | "verify_failed" | "backend_error";
+export type FallbackReason =
+  | "pc_unreachable" | "timeout" | "verify_failed" | "backend_error"
+  // chat only: why a message was answered by Claude instead of the local model
+  | "agent_asked" | "step_limit" | "gave_up" | "triage" | "too_long" | "user_request";
 export type VerifyStatus = "pass" | "fail" | "skipped";
 
 export interface VerifyResult {
@@ -35,11 +38,14 @@ export interface Backend {
   run(req: BackendRequest): Promise<BackendResult>;
 }
 
+/** The ways a call to a backend itself can fail. */
+export type BackendFailure = "pc_unreachable" | "timeout" | "backend_error";
+
 /** A backend call failed for a reason that is not the model's answer quality. */
 export class BackendError extends Error {
-  reason: Exclude<FallbackReason, "verify_failed">;
+  reason: BackendFailure;
 
-  constructor(reason: Exclude<FallbackReason, "verify_failed">, message: string) {
+  constructor(reason: BackendFailure, message: string) {
     super(message);
     this.name = "BackendError";
     this.reason = reason;
@@ -96,7 +102,7 @@ export interface AttemptRecord {
   escalated: boolean;
   fallbackReason: FallbackReason | null;
   outputFile: string | null;
-  mode: "run" | "eval";
+  mode: "run" | "eval" | "chat";
   taskId: string | null;
 }
 

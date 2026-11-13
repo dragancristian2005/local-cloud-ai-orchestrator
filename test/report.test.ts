@@ -98,3 +98,25 @@ test("orch report rejects an unknown --mode", async () => {
   const { configPath } = writeTempConfig(ollamaOnlyConfig("http://127.0.0.1:1"));
   assert.equal((await runCli(["report", "--mode", "weekly", "--config", configPath])).code, 2);
 });
+
+test("chat records are left out unless asked for", () => {
+  const records = [rec(), rec({ mode: "chat", taskType: "chat", runId: "s1", taskId: "turn-1" })];
+  assert.equal(summarize(records)[0]!.attempts, 1);
+  assert.equal(summarize(records, { mode: "chat" })[0]!.attempts, 1);
+  assert.equal(summarize(records, { mode: "run" })[0]!.attempts, 1);
+});
+
+test("a chat group's escalation rate counts turns", () => {
+  const chat = { mode: "chat", taskType: "chat", runId: "s1" } as const;
+  const rows = summarize(
+    [
+      rec({ ...chat, taskId: "turn-1" }),
+      rec({ ...chat, taskId: "turn-2", verify: "skipped", fallbackReason: "agent_asked", escalated: true }),
+      rec({ ...chat, taskId: "turn-3" }),
+      rec({ ...chat, taskId: "turn-4", verify: "skipped", fallbackReason: "triage", escalated: true }),
+    ],
+    { mode: "chat" },
+  );
+  assert.equal(rows[0]!.escalationRate, 0.5);
+  assert.equal(rows[0]!.passRate, 0.5);
+});

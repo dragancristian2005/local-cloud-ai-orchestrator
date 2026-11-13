@@ -145,3 +145,12 @@ test("a secrets file is refused however it is reached", () => {
     assert.equal(decide(command), "deny", command);
   }
 });
+
+test("a short option is auto-approved only when it is plain letters and digits", () => {
+  for (const command of ["git diff -pO/etc/passwd", "git log -n5O../x", "git diff -O~/order", "ls -la/etc", "git diff -U3/../x", "git log -S.env"]) {
+    assert.notEqual(decide(command), "allow", command);
+  }
+  for (const command of ["ls -la", "git log -5", "git log -n 5", "git diff -U3", "git log -p -2"]) {
+    assert.equal(decide(command), "allow", command);
+  }
+});

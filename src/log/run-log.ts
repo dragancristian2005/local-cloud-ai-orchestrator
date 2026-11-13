@@ -27,6 +27,13 @@ export class RunLog {
     return [path.basename(this.runsDir), runId, name].join("/");
   }
 
+  /** Append one line to a file in a run's directory. Returns its path as logged: "<runs dir name>/<runId>/<name>". */
+  appendArtifact(runId: string, name: string, line: string): string {
+    mkdirSync(path.join(this.runsDir, runId), { recursive: true });
+    appendFileSync(path.join(this.runsDir, runId, name), line + "\n");
+    return [path.basename(this.runsDir), runId, name].join("/");
+  }
+
   append(rec: AttemptRecord): void {
     mkdirSync(this.runsDir, { recursive: true });
     appendFileSync(this.logFile, JSON.stringify(rec) + "\n");
