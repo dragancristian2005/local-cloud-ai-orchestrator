@@ -47,6 +47,8 @@ export interface AgentTurnOptions {
   sessionAllowed: Set<string>;
   /** Whether the repository is on main or master. A function is asked again before every command. */
   onMainBranch: boolean | (() => boolean | Promise<boolean>);
+  /** Whether the folder is a git repository (default true). A function is asked again before every command. */
+  gitRepository?: boolean | (() => boolean | Promise<boolean>);
   approve: (command: string) => Promise<Approval>;
   onEvent?: (event: AgentEvent) => void;
   signal?: AbortSignal;
@@ -65,14 +67,24 @@ const MAX_COMMAND_OUTPUT_CHARS = 4000;
 const SAME_CALL_LIMIT = 3;
 const TOOL_NAMES = TOOL_DEFINITIONS.map((tool) => tool.function.name).join(", ");
 
-function cap(result: string): string {
+// A small model can emit dozens of calls in one reply; only the first few are run.
+const MAX_CALLS_PER_REPLY = 8;
+// The part of the history budget one reply's tool results may fill, so that the group still fits
+// and fitHistory does not drop all of it.
+const RESULTS_SHARE_OF_HISTORY = 0.6;
+
+function cap(result: string, limit: number): string {
   const note = "\n[result cut]";
-  return result.length <= MAX_TOOL_RESULT_CHARS ? result : result.slice(0, MAX_TOOL_RESULT_CHARS - note.length) + note;
+  return result.length <= limit ? result : result.slice(0, Math.max(0, limit - note.length)) + note;
 }
 
 function describe(call: ToolCall): string {
-  const value = call.arguments.path ?? call.arguments.query ?? "";
-  return typeof value === "string" && value !== "" ? `${call.name} ${value}` : call.name;
+  const text = (value: unknown): string => (typeof value === "string" ? value : "");
+  const path = text(call.arguments.path);
+  if (call.name === "search") {
+    return `search "${text(call.arguments.query)}"${path === "" ? "" : ` in ${path}`}`;
+  }
+  return path === "" ? call.name : `${call.name} ${path}`;
 }
 
 /** Run a command the model asked for, if the rules and the user allow it. Returns the tool result text. */
@@ -82,7 +94,8 @@ async function runCommandTool(call: ToolCall, opts: AgentTurnOptions): Promise<s
 
   // Looked up now, not at the start of the chat: the branch may have changed since.
   const onMainBranch = typeof opts.onMainBranch === "function" ? await opts.onMainBranch() : opts.onMainBranch;
-  const verdict = classifyCommand(command, { allowCommands: opts.allowCommands, onMainBranch });
+  const gitRepository = typeof opts.gitRepository === "function" ? await opts.gitRepository() : (opts.gitRepository ?? true);
+  const verdict = classifyCommand(command, { allowCommands: opts.allowCommands, onMainBranch, gitRepository });
   if (verdict.decision === "deny") {
     opts.onEvent?.({ type: "command", command, verdict: "refused", detail: verdict.reason });
     return `refused: ${verdict.reason}`;
@@ -180,7 +193,16 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<TurnResult> 
     messages.push({ role: "assistant", content: reply.content, toolCalls: reply.toolCalls, from: backend.id });
     // Every call gets a result, even when the turn ends early, so the history stays well-formed.
     let handOver: TurnResult | undefined;
-    for (const call of reply.toolCalls) {
+    // History is budgeted in tokens, estimated as characters / 3.
+    const share = Math.min(
+      MAX_TOOL_RESULT_CHARS,
+      Math.floor((opts.historyTokenBudget * 3 * RESULTS_SHARE_OF_HISTORY) / Math.min(reply.toolCalls.length, MAX_CALLS_PER_REPLY)),
+    );
+    for (const [index, call] of reply.toolCalls.entries()) {
+      if (index >= MAX_CALLS_PER_REPLY) {
+        messages.push({ role: "tool", toolName: call.name, content: "not run: too many tool calls in one reply" });
+        continue;
+      }
       const key = `${call.name} ${JSON.stringify(call.arguments)}`;
       const seen = (timesSeen.get(key) ?? 0) + 1;
       timesSeen.set(key, seen);
@@ -198,7 +220,7 @@ export async function runAgentTurn(opts: AgentTurnOptions): Promise<TurnResult> 
       } else {
         result = await runTool(call, opts);
       }
-      messages.push({ role: "tool", toolName: call.name, content: cap(result) });
+      messages.push({ role: "tool", toolName: call.name, content: cap(result, share) });
     }
     if (handOver !== undefined) return { ...handOver, durationMs: Date.now() - started };
   }
