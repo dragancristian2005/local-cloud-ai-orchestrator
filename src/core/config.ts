@@ -25,6 +25,18 @@ export interface OrchestratorConfig {
   retryBeforeEscalate: number;
   promptTokenBudget: number;
   runsDir: string;
+  agent: AgentConfig;
+}
+
+/** Settings for the chat: how far the local model may go on its own. */
+export interface AgentConfig {
+  /** Tool rounds the local model gets per message before the turn is handed over. */
+  maxSteps: number;
+  commandTimeoutMs: number;
+  /** Commands that run without asking. Anything else is shown to the user first. */
+  allowCommands: string[];
+  historyTokenBudget: number;
+  claudeTranscriptTokens: number;
 }
 
 export const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
@@ -36,6 +48,14 @@ const DEFAULT_OLLAMA_OPTIONS = { num_ctx: 8192, temperature: 0.2 };
 const DEFAULT_PROMPT_TOKEN_BUDGET = 6000;
 // Only these keys: config must never be able to point the Claude backend at another binary.
 const CLAUDE_CLI_KEYS = new Set(["type", "timeoutMs", "model"]);
+
+const DEFAULT_AGENT: AgentConfig = {
+  maxSteps: 8,
+  commandTimeoutMs: 60_000,
+  allowCommands: ["git status", "git diff", "git log", "ls", "pwd"],
+  historyTokenBudget: 5000,
+  claudeTranscriptTokens: 20_000,
+};
 
 type Json = Record<string, unknown>;
 
@@ -71,6 +91,7 @@ function mergeLocal(base: Json, local: Json): Json {
     }
     merged.backends = backends;
   }
+  if (isObject(base.agent) && isObject(local.agent)) merged.agent = { ...base.agent, ...local.agent };
   return merged;
 }
 
@@ -131,6 +152,29 @@ function parseBackend(id: string, raw: unknown): BackendConfig {
   throw new ConfigError(`${where} has unknown type ${JSON.stringify(raw.type)} (expected "ollama" or "claude-cli")`);
 }
 
+function parseAgent(raw: unknown): AgentConfig {
+  if (raw === undefined) return { ...DEFAULT_AGENT, allowCommands: [...DEFAULT_AGENT.allowCommands] };
+  if (!isObject(raw)) throw new ConfigError(`"agent" must be an object`);
+  const number = (key: "maxSteps" | "commandTimeoutMs" | "historyTokenBudget" | "claudeTranscriptTokens") =>
+    raw[key] === undefined ? DEFAULT_AGENT[key] : positiveNumber(raw[key], `"agent.${key}"`);
+  const maxSteps = number("maxSteps");
+  if (!Number.isInteger(maxSteps) || maxSteps > 50) throw new ConfigError(`"agent.maxSteps" must be a whole number from 1 to 50`);
+  let allowCommands = [...DEFAULT_AGENT.allowCommands];
+  if (raw.allowCommands !== undefined) {
+    if (!Array.isArray(raw.allowCommands) || raw.allowCommands.some((entry) => typeof entry !== "string" || entry.trim() === "")) {
+      throw new ConfigError(`"agent.allowCommands" must be an array of commands, for example ["git status", "npm test"]`);
+    }
+    allowCommands = (raw.allowCommands as string[]).map((entry) => entry.trim());
+  }
+  return {
+    maxSteps,
+    commandTimeoutMs: number("commandTimeoutMs"),
+    allowCommands,
+    historyTokenBudget: number("historyTokenBudget"),
+    claudeTranscriptTokens: number("claudeTranscriptTokens"),
+  };
+}
+
 /**
  * Load the config file, merge `orchestrator.local.json` from the same directory over it if present,
  * apply defaults and validate. With no argument, reads `config/orchestrator.config.json` in the project.
@@ -178,5 +222,6 @@ export function loadConfig(file: string = DEFAULT_CONFIG_PATH): OrchestratorConf
     retryBeforeEscalate: retry,
     promptTokenBudget: budget,
     runsDir: path.resolve(PROJECT_ROOT, runsDir),
+    agent: parseAgent(raw.agent),
   };
 }

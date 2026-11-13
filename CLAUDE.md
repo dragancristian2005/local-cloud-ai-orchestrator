@@ -14,10 +14,12 @@ A small TypeScript CLI that runs coding-related tasks on the cheapest backend th
 4. Run tier 0 -> **verify** -> if it fails, optionally retry once with the failure output -> escalate to next tier.
 5. Log every attempt to JSONL so models and tiers can be compared by pass rate, escalation rate and time.
 
-The local model is a **stateless worker**: it gets a prompt and returns text. It never gets file access or runs an agent loop (small models are unreliable at that). The orchestrator owns the loop, the files, git and the tests.
+For `orch run` and `orch eval` the local model is a **stateless worker**: it gets a prompt and returns text.
+
+In the chat (`orch` with no arguments, or `orch chat`) the local model drives an **agent loop** through tool calls. Small models are unreliable at this, so the orchestrator still owns the files and the shell: the model only asks for a tool; reads stay inside the repository and skip secrets files; every command needs the user's approval unless it is on the allow-list; and the refuse-list in `src/agent/permissions.ts` enforces the Hard rules whatever the user answers. A router decides per message whether the local model or Claude answers, and a turn the local model cannot finish is handed to Claude.
 
 ## Hard rules (do not violate)
-- The Claude backend ONLY spawns the unmodified `claude` binary as a subprocess (`claude -p ...`), using whatever login the user already has. Never read, copy, extract or proxy OAuth tokens or credentials. Never route the subscription through a gateway/proxy. Check `claude --help` for the exact flags; do not guess.
+- The Claude backend ONLY spawns the unmodified `claude` binary as a subprocess (`claude -p ...`), using whatever login the user already has. Never read, copy, extract or proxy OAuth tokens or credentials. Never route the subscription through a gateway/proxy. Check `claude --help` for the exact flags; do not guess. In the chat, `claude -p` may be given the read-only tools `Read`, `Grep` and `Glob` in the repository; it is never given a tool that writes files or runs commands.
 - Run Claude calls sequentially (concurrency 1). No unattended bulk/benchmark runs against the subscription.
 - Never expose Ollama to the internet. Assume it is reachable only on the LAN/Tailscale at `http://<pc>:11434`.
 - Never write to the user's main branch. Code-changing tasks apply on a throwaway branch or git worktree, and never auto-commit unless a `--commit` flag is passed.
@@ -101,8 +103,10 @@ Log record (one JSON line per attempt):
 3. **M3:** `orch eval --backend pc-ollama` runs the fixed task set; `orch report` prints pass rate / escalation rate / avg time per model from the logs.
 4. **M4 (only if M1–M3 are fun):** code-changing tasks (`small-edit`) verified by the project's own test command on a throwaway branch.
 
+5. **M5:** the chat. `orch` opens a conversation in the current repository; a router sends each message to the local model (agent loop with read, search and approved commands) or to Claude (headless, read-only tools). Plan: `docs/superpowers/plans/2026-11-12-chat-agent.md`.
+
 ## Non-goals
-Agent loops on the local model, multi-backend adapters for other CLIs, a web UI, benchmarks like SWE-bench (too costly for a zero-budget project), selling it.
+Multi-backend adapters for other CLIs, a web UI, benchmarks like SWE-bench (too costly for a zero-budget project), selling it.
 
 ## Decisions (settled in the first session)
 - **Config:** JSON, parsed by `JSON.parse`. A gitignored `config/orchestrator.local.json` is merged over the committed file.

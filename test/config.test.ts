@@ -78,3 +78,28 @@ test("rejects a baseUrl that is not an http URL", () => {
     assert.throws(() => loadConfig(file), (err: unknown) => err instanceof ConfigError && /baseUrl/.test(err.message), baseUrl);
   }
 });
+
+test("agent settings have defaults", () => {
+  const cfg = loadConfig(writeConfig(BASE));
+  assert.deepEqual(cfg.agent, {
+    maxSteps: 8,
+    commandTimeoutMs: 60000,
+    allowCommands: ["git status", "git diff", "git log", "ls", "pwd"],
+    historyTokenBudget: 5000,
+    claudeTranscriptTokens: 20000,
+  });
+});
+
+test("the local file can extend the allow-list and keep the other agent defaults", () => {
+  const file = writeConfig(BASE, { agent: { allowCommands: ["git status", "npm test"] } });
+  const cfg = loadConfig(file);
+  assert.deepEqual(cfg.agent.allowCommands, ["git status", "npm test"]);
+  assert.equal(cfg.agent.maxSteps, 8);
+});
+
+test("rejects invalid agent settings", () => {
+  assert.throws(() => loadConfig(writeConfig({ ...BASE, agent: { maxSteps: 0 } })), ConfigError);
+  assert.throws(() => loadConfig(writeConfig({ ...BASE, agent: { allowCommands: "git status" } })), ConfigError);
+  assert.throws(() => loadConfig(writeConfig({ ...BASE, agent: { allowCommands: ["ok", 5] } })), ConfigError);
+  assert.throws(() => loadConfig(writeConfig({ ...BASE, agent: { commandTimeoutMs: -1 } })), ConfigError);
+});
