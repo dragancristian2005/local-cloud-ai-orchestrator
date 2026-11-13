@@ -27,9 +27,10 @@ const SAME_COMMAND = "[^;&|\\n]*"; // stays inside one command of a pipeline or 
 const CREDENTIALS_REASON = "commands that touch credentials or secrets files are not allowed";
 
 /**
- * Commands that are never run, whatever the user answers. They enforce the project's hard rules:
- * nothing destructive, no pushing, no touching credentials. This list is a backstop, not a
- * sandbox: the user's approval of every other command is the real control.
+ * Commands that are never run, whatever the user answers. They back up the project's hard rules:
+ * nothing destructive, no pushing, no touching credentials. The list covers the common forms of
+ * these commands, not every form: it is a backstop, not a sandbox. Another spelling reaches the
+ * user as an approval prompt, and that approval is the real control.
  */
 const ALWAYS_REFUSED: { pattern: RegExp; reason: string }[] = [
   { pattern: new RegExp(`\\brm\\b${SAME_COMMAND}?\\s(-[a-zA-Z]*[rRfF][a-zA-Z]*|--recursive|--force)(?=\\s|$)`), reason: "rm with -r or -f is not allowed" },

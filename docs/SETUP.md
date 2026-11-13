@@ -326,8 +326,9 @@ Type `/exit` to leave. Afterwards, from the orchestrator's folder:
 orch report --mode chat
 ```
 
-shows how many turns the local model kept (`pass %`) and how many it handed over
-(`escalated %`). If nearly everything is handed over, or nothing ever is, the model is not
+shows one row per model. `escalated %` is the share of your messages that ended up with Claude.
+`pass %` is lower than the rest: a message the router sent straight to Claude, and an answer you
+redid with `/claude`, each count as one failed local attempt. If nearly everything is handed over, or nothing ever is, the model is not
 following the triage: try another one.
 
 ---

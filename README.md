@@ -53,6 +53,9 @@ looks off, type `/claude` and Claude answers the same message again.
 | read a file, list a folder, search for text | no; only inside the project, never `.env`, keys or `.git/` |
 | run a command | yes, unless it is on the allow-list |
 
+`git diff` and `git log -p` show whatever is tracked, so a secrets file that was committed can
+still appear in their output.
+
 At the prompt `Run this command? ...  [y]es / [n]o / [a]lways:` answer `y` to run it, `n` to refuse,
 `a` to stop being asked for that exact command in this session.
 
@@ -64,16 +67,28 @@ shell operators, quotes or wildcards, and no path that leaves the project. Add y
 { "agent": { "allowCommands": ["git status", "git diff", "git log", "ls", "pwd", "npm test"] } }
 ```
 
-Some commands are refused whatever you answer: `rm` with `-r` or `-f`, `git reset --hard`,
-`git clean`, `git push`, discarding changes, commits while on `main`, `sudo`, and anything that
-names a credentials or secrets file. This list backs up the rules above; it is not a sandbox. Read
-a command before you approve it.
+The common forms of some commands are refused whatever you answer: `rm` with `-r` or `-f`,
+`git reset --hard`, `git clean`, `git push`, discarding changes, commits while on `main`, `sudo`,
+and commands that name a credentials or secrets file. Other spellings of the same thing reach you
+as a normal approval prompt, so read a command before you approve it.
+
+A command is stopped after 60 seconds (`agent.commandTimeoutMs`). Ctrl-C leaves the chat and stops
+a running command.
+
+Pasted lines are sent as one message. When input is piped instead of typed, at most three messages
+per session are handed to Claude.
+
+Each session's transcript, including the file contents and command output the tools returned, is
+kept in `runs/<session id>/transcript.jsonl`.
 
 **What Claude can do in the chat**
 
 Claude runs headless in the project folder with three read-only tools (`Read`, `Grep`, `Glob`).
 It cannot change files or run commands; when a change is needed it shows a diff for you to apply.
 Unlike the local tools, Claude's `Read` can open any file in the project, including `.env`.
+
+In a project whose `.claude/settings.json` sets an API key or another provider, the hand-over to
+Claude is refused, so it cannot bill anything.
 
 **Commands:** `/claude` (redo the last answer with Claude), `/clear`, `/help`, `/exit`.
 

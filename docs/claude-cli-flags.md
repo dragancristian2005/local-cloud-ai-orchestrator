@@ -47,10 +47,18 @@ echo "Which file defines the CLI entry point? Answer in one line." | \
 It should print one JSON object whose `result` names a file, and it should not wait for input.
 If a flag is rejected or it hangs, note what happened here: the chat's hand-over depends on it.
 
+**Open question for the Mac:** `claude --help` describes `--restricted` as ignoring project
+settings files and confining file tools to the working directory. If the Mac's version has it and
+the one real call still works with it, it is a better fit than the settings check in `runAgent`.
+(`--setting-sources user` is a second candidate: it would load user settings only.) Until one of
+them has been tried with a real call, `runAgent` reads `.claude/settings.json` and
+`.claude/settings.local.json` itself, right before `claude` starts, and refuses when either would
+change who is billed.
+
 Never used:
 
 - `--bare`: its help text says OAuth and the keychain are never read, so it would require an API key.
-- `--dangerously-skip-permissions`, `--permission-mode`: not needed with all tools disabled.
+- `--dangerously-skip-permissions`, `--permission-mode`: never used. In chat, `--permission-prompts none` makes anything that would ask fail instead.
 
 If a flag is missing on your version, remove it from `CLAUDE_ARGS` in `src/backends/claude-cli.ts`
 and from the table. Do not substitute a guess.
