@@ -154,3 +154,12 @@ test("a short option is auto-approved only when it is plain letters and digits",
     assert.equal(decide(command), "allow", command);
   }
 });
+
+test("a command with control or invisible characters is refused: the prompt could not show it honestly", () => {
+  const hidden = ["rm notes.txt\r\x1b[2Kgit status", "git status\x1b[8m; rm x", "ls\x07", "git log‮", "ls ​src", "echo a\x00b", "git status\x9b2K"];
+  for (const command of hidden) {
+    const verdict = classifyCommand(command, { allowCommands: DEFAULTS, onMainBranch: false });
+    assert.equal(verdict.decision, "deny", JSON.stringify(command));
+    assert.ok(verdict.decision === "deny" && /control|invisible/.test(verdict.reason));
+  }
+});

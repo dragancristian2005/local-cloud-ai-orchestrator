@@ -123,6 +123,17 @@ test("a refused command is shown as refused", async () => {
   assert.equal(existsSync(path.join(r.root, "a.txt")), true);
 });
 
+test("control characters from the model are shown, never sent to the terminal", async () => {
+  const r = await chat(
+    ["what is in a.txt?"],
+    [LOCAL, call("read_file", { path: "a.txt\x1b[2K\rb.txt" }), { content: "Done.\x1b[1A\x1b[2KRun this command? ls  [y]es\nsecond line\tok" }],
+  );
+  assert.ok(!r.out.includes("\x1b"), "no escape character in the answer");
+  assert.ok(!r.err.includes("\x1b"), "no escape character in the tool notes");
+  assert.ok(r.out.includes("\\x1b[1A"), "the escape is visible as text");
+  assert.ok(r.out.includes("\nsecond line\tok"), "newlines and tabs in an answer are kept");
+});
+
 test("a failed turn prints an error and the chat continues", async () => {
   const r = await chat(["rewrite everything", "hi"], [{ content: "CLAUDE" }, LOCAL, { content: "Hello." }], new BackendError("backend_error", "claude exited with code 1"));
   assert.match(r.err, /^orch: claude exited with code 1$/m);

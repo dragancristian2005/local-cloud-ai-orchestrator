@@ -60,6 +60,11 @@ function isSafeArgument(arg: string): boolean {
   return !LEAVES_REPOSITORY.test(arg) && !LEAVES_REPOSITORY.test(value);
 }
 
+// Characters that can make a terminal show something other than the text: control codes
+// (escape, carriage return, backspace, newline...), and invisible or direction-changing Unicode.
+// The approval prompt is the user's only view of a command, so such a command is never run.
+const UNSHOWABLE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
+
 const COMMITS_ON_MAIN = git("commit|merge|rebase|cherry-pick|revert|am");
 
 // Characters the shell gives a meaning to. With any of them the words the program receives are
@@ -75,6 +80,9 @@ export function classifyCommand(
   command: string,
   opts: { allowCommands: string[]; onMainBranch: boolean },
 ): CommandVerdict {
+  if (UNSHOWABLE.test(command)) {
+    return { decision: "deny", reason: "the command contains control or invisible characters; write it on one plain line" };
+  }
   // Case is ignored throughout: on macOS "RM" runs rm and ".ENV" opens .env.
   for (const rule of ALWAYS_REFUSED) {
     if (new RegExp(rule.pattern.source, "i").test(command)) return { decision: "deny", reason: rule.reason };

@@ -46,7 +46,7 @@ export class ChatSession {
     local: ChatBackend;
     cloud: CloudAgent | null;
     root: string;
-    onMainBranch: boolean;
+    onMainBranch: boolean | (() => boolean | Promise<boolean>);
     agent: AgentConfig;
     log: RunLog;
     approve: (command: string) => Promise<Approval>;

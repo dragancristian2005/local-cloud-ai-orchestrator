@@ -45,7 +45,8 @@ export interface AgentTurnOptions {
   allowCommands: string[];
   /** Exact commands the user answered "always" to in this session. */
   sessionAllowed: Set<string>;
-  onMainBranch: boolean;
+  /** Whether the repository is on main or master. A function is asked again before every command. */
+  onMainBranch: boolean | (() => boolean | Promise<boolean>);
   approve: (command: string) => Promise<Approval>;
   onEvent?: (event: AgentEvent) => void;
   signal?: AbortSignal;
@@ -79,7 +80,9 @@ async function runCommandTool(call: ToolCall, opts: AgentTurnOptions): Promise<s
   const command = call.arguments.command;
   if (typeof command !== "string" || command.trim() === "") return `error: "command" must be a non-empty string`;
 
-  const verdict = classifyCommand(command, opts);
+  // Looked up now, not at the start of the chat: the branch may have changed since.
+  const onMainBranch = typeof opts.onMainBranch === "function" ? await opts.onMainBranch() : opts.onMainBranch;
+  const verdict = classifyCommand(command, { allowCommands: opts.allowCommands, onMainBranch });
   if (verdict.decision === "deny") {
     opts.onEvent?.({ type: "command", command, verdict: "refused", detail: verdict.reason });
     return `refused: ${verdict.reason}`;

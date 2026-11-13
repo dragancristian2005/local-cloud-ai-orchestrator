@@ -227,7 +227,6 @@ async function chatCommand(args: string[]): Promise<number> {
     cloud = second;
   }
 
-  const branch = await currentBranch(root);
   process.stderr.write(
     `orch chat in ${root}\n` +
       `local model: ${local.model}` +
@@ -244,7 +243,8 @@ async function chatCommand(args: string[]): Promise<number> {
         local,
         cloud,
         root,
-        onMainBranch: branch === "main" || branch === "master",
+        // Asked before every command: the branch can change while the chat is open.
+        onMainBranch: async () => ["main", "master"].includes((await currentBranch(root)) ?? ""),
         agent: config.agent,
         log,
         ...hooks,

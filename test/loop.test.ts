@@ -222,3 +222,20 @@ test("events are reported for tools and commands", async () => {
     { type: "command", command: "node -v", verdict: "declined" },
   ]);
 });
+
+test("the main-branch rule is checked for each command, not once", async () => {
+  const root = makeRoot();
+  const backend = fakeChatBackend([call("run_command", { command: "git commit -m one" }), call("run_command", { command: "git commit -m two" }), { content: "ok" }]);
+  const messages: ChatMessage[] = [{ role: "user", content: "commit twice" }];
+  let checks = 0;
+  await runAgentTurn({
+    backend, messages, root, maxSteps: 8, historyTokenBudget: 5000, commandTimeoutMs: 5000,
+    allowCommands: [], sessionAllowed: new Set(),
+    // Off main for the first command; on main by the time of the second (someone switched branch).
+    onMainBranch: async () => ++checks > 1,
+    approve: async () => "no",
+  });
+  const results = messages.filter((m) => m.role === "tool").map((m) => m.content);
+  assert.equal(results[0], "the user declined to run this command");
+  assert.match(results[1]!, /^refused: commits are not made on the main branch/);
+});

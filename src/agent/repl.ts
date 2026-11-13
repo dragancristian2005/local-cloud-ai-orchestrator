@@ -40,16 +40,29 @@ function lineReader(input: NodeJS.ReadableStream): { next(): Promise<string | nu
   };
 }
 
+/**
+ * Text from a model, made safe to print: control characters (escape sequences could redraw the
+ * screen or fake a prompt) and invisible Unicode are shown as visible codes instead of being sent
+ * to the terminal. Newlines and tabs are kept where an answer may have them.
+ */
+function printable(text: string, keepLayout = false): string {
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, (char) => {
+    if (keepLayout && (char === "\n" || char === "\t")) return char;
+    const code = char.codePointAt(0)!;
+    return code <= 0xff ? `\\x${code.toString(16).padStart(2, "0")}` : `\\u${code.toString(16).padStart(4, "0")}`;
+  });
+}
+
 function describe(event: ChatEvent): string {
   switch (event.type) {
     case "handover":
       return `(to claude: ${REASON_TEXT[event.reason]})`;
     case "tool":
-      return `  [${event.summary}]`;
+      return `  [${printable(event.summary)}]`;
     case "command":
-      if (event.verdict === "refused") return `  [refused] ${event.command} (${event.detail ?? "not allowed"})`;
-      if (event.verdict === "declined") return `  [declined] ${event.command}`;
-      return `  [run] ${event.command} -> exit ${event.exitCode ?? "unknown"}`;
+      if (event.verdict === "refused") return `  [refused] ${printable(event.command)} (${event.detail ?? "not allowed"})`;
+      if (event.verdict === "declined") return `  [declined] ${printable(event.command)}`;
+      return `  [run] ${printable(event.command)} -> exit ${event.exitCode ?? "unknown"}`;
   }
 }
 
@@ -88,7 +101,7 @@ export async function runRepl(opts: {
 
   const session = opts.createSession({
     approve: async (command) => {
-      note(`Run this command? ${command}  [y]es / [n]o / [a]lways: `);
+      note(`Run this command? ${printable(command)}  [y]es / [n]o / [a]lways: `);
       const answer = (await lines.next())?.trim().toLowerCase();
       if (!inputIsTerminal) note("\n");
       if (answer === "y" || answer === "yes") return "yes";
@@ -104,8 +117,8 @@ export async function runRepl(opts: {
 
   const show = (reply: ChatReply) => {
     stopTicker();
-    if (reply.error !== undefined) note(`orch: ${reply.error}\n`);
-    else say(`${reply.routedBecause === null ? "local" : "claude"}> ${reply.text}\n`);
+    if (reply.error !== undefined) note(`orch: ${printable(reply.error, true)}\n`);
+    else say(`${reply.routedBecause === null ? "local" : "claude"}> ${printable(reply.text, true)}\n`);
   };
 
   for (;;) {
