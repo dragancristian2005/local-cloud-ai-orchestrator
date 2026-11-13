@@ -81,6 +81,8 @@ export function runCommand(command: string, opts: { cwd: string; timeoutMs: numb
 export function failureTail(output: string, maxLines?: number, maxChars?: number): string;   // defaults 30 and 1500
 ```
 
+If `src/core/command.ts` already exists (the chat-agent plan builds the same `runCommand` there), skip writing it again: re-export `runCommand` and `CommandResult` from `src/core/verifier.ts` and add only `failureTail`.
+
 `runCommand` spawns with `{ shell: true, cwd, detached: true }`, merges stdout and stderr in arrival order into `output` (keeping the last 20 000 characters), and never rejects. `ok` is `exitCode === 0 && !timedOut`. On timeout, or when `signal` aborts, it kills the process group with `process.kill(-pid, "SIGKILL")`; an aborted run resolves with `ok false`.
 
 - [ ] **Step 1: Write the failing tests**
