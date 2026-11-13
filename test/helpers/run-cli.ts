@@ -13,15 +13,17 @@ export interface CliResult {
 }
 
 /** Run the real CLI in a child process. */
-export function runCli(args: string[], env: Record<string, string> = {}): Promise<CliResult> {
+export function runCli(args: string[], env: Record<string, string> = {}, stdin?: string): Promise<CliResult> {
   return new Promise((resolve) => {
     // Start from this machine's environment minus the variables the Claude backend refuses to run with.
     const base = { ...process.env };
     for (const key of BILLING_ENV_VARS) delete base[key];
-    execFile(process.execPath, [CLI, ...args], { env: { ...base, ...env } }, (err, stdout, stderr) => {
+    const child = execFile(process.execPath, [CLI, ...args], { env: { ...base, ...env } }, (err, stdout, stderr) => {
       const code = err === null ? 0 : typeof err.code === "number" ? err.code : 1;
       resolve({ code, stdout, stderr });
     });
+    // What the person would type, line by line. Always closed, so the CLI never waits for a terminal.
+    child.stdin?.end(stdin ?? "");
   });
 }
 

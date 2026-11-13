@@ -19,6 +19,8 @@ Parts 2 and 3 on the Mac. Allow about 30 minutes, most of it the model download.
 > - Part 2, step 1: the `claude` sign-in check and the API-key check
 > - Part 2, step 5: the connection test from the Mac to the real PC
 > - Part 3, steps 1–4 against a real model (they were run against a stand-in)
+> - Part 3, step 5: the chat, with a real model that supports tool calling, and its first real
+>   hand-over to Claude with read-only tools
 
 ---
 
@@ -281,6 +283,53 @@ pc-ollama  qwen2.5-coder:7b        12      67            -    1.4        0
 (Your numbers will differ.) `orch eval --backend claude` is refused on purpose: no bulk runs
 against the subscription.
 
+### 5. Chat with it
+
+The chat needs a local model that supports tool calling. Ollama's examples use `qwen3`; pick a size
+that fits in 8 GB from <https://ollama.com/library> and pull it on the PC (`<tool-model>` below).
+Then, on the Mac, point `orch` at it in `config/orchestrator.local.json`:
+
+```json
+{
+  "backends": {
+    "pc-ollama": { "baseUrl": "http://192.168.1.50:11434", "model": "<tool-model>" }
+  }
+}
+```
+
+Go to any project and type `orch`:
+
+```
+$ cd ~/dev/my-project
+$ orch
+orch chat in /Users/you/dev/my-project
+local model: <tool-model>; harder requests go to Claude (read-only)
+Type /help for commands, /exit to leave.
+>
+```
+
+Try these four, in order:
+
+1. **A question about the code**, for example `what does this project do?` You should see lines
+   such as `[list_dir]` and `[read_file README.md]`, then an answer starting with `local>`.
+2. **Something that needs a command**, for example `what were the last three commits?` `git log`
+   is on the allow-list, so it runs without asking: `[run] git log --oneline -3 -> exit 0`.
+   Then try `run the tests`: you are asked `Run this command? npm test  [y]es / [n]o / [a]lways:`.
+3. **A request to change code**, for example `rename the helper in src/util.ts to formatDate`.
+   You should see `(to claude: the request needs more than the local model)` and an answer
+   starting with `claude>` that contains a diff. Nothing in your files changes.
+4. **`/claude`** after any local answer: Claude answers the same message again.
+
+Type `/exit` to leave. Afterwards, from the orchestrator's folder:
+
+```sh
+orch report --mode chat
+```
+
+shows how many turns the local model kept (`pass %`) and how many it handed over
+(`escalated %`). If nearly everything is handed over, or nothing ever is, the model is not
+following the triage: try another one.
+
 ---
 
 ## Part 4 — Troubleshooting
@@ -296,5 +345,9 @@ against the subscription.
 | `timeout` on every call | The model does not fit in 8 GB of VRAM and runs partly on the CPU | `ollama ps` on the PC: anything but `100% GPU` means too big. Use a smaller model. |
 | `verify fail` again and again | The model's answers break the task's rules | Read the reason in the stderr line; look at the raw answer in `runs/<run id>/`. Try another model with `--model`. |
 | Claude tier: `backend_error` | `claude` is not signed in, or a flag changed in a newer version | Run `claude -p "hi"` by hand. Then compare `claude --help` with `docs/claude-cli-flags.md`. |
+| Chat: `... does not support tool calling` | The local model cannot use tools | Pull a model with tool support and set it in `config/orchestrator.local.json`. Until then every message goes to Claude. |
+| Chat: everything goes to Claude, or nothing does | The model does not follow the one-word triage | Try another model. `orch report --mode chat` shows the share. `/claude` always works. |
+| Chat: `[refused] ...` | The command is on the refuse-list (destructive, or it names a secrets file) | Run it yourself in another terminal if you really mean it. |
+| Chat: `refusing to chat in ... your home directory` | `orch` was started outside a project | `cd` into a project folder first. |
 | `orch: command not found` | `npm link` was not run | Run `npm link` in the project folder, or use `npm run orch -- <args>`. |
 | `nothing staged` | No staged changes for a commit message | `git add` something first. |

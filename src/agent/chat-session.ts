@@ -16,6 +16,9 @@ export interface CloudAgent {
   runAgent(req: { prompt: string; cwd: string; timeoutMs: number }): Promise<BackendResult>;
 }
 
+/** What the interface is told while a message is handled. */
+export type ChatEvent = AgentEvent | { type: "handover"; reason: EscalationReason };
+
 export interface ChatReply {
   text: string;
   /** The id of the backend that answered; null when nobody could. */
@@ -47,7 +50,7 @@ export class ChatSession {
     agent: AgentConfig;
     log: RunLog;
     approve: (command: string) => Promise<Approval>;
-    onEvent?: (event: AgentEvent) => void;
+    onEvent?: (event: ChatEvent) => void;
   };
   private messages: ChatMessage[] = [];
   private turn = 0;
@@ -130,6 +133,7 @@ export class ChatSession {
       return { text: "", answeredBy: null, routedBecause: reason, error };
     }
 
+    this.opts.onEvent?.({ type: "handover", reason });
     const prompt = CLAUDE_PROMPT(renderTranscript(this.messages, this.opts.agent.claudeTranscriptTokens));
     const started = Date.now();
     try {
