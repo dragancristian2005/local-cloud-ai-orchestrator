@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ClaudeCliBackendConfig } from "../core/config.ts";
@@ -33,6 +33,40 @@ export const BILLING_ENV_VARS = [
   "CLAUDE_CODE_USE_VERTEX",
   "CLAUDE_CODE_USE_FOUNDRY",
 ];
+
+// A project's own Claude settings, which `claude` reads when it runs inside that project.
+const PROJECT_SETTINGS_FILES = ["settings.json", "settings.local.json"];
+
+/**
+ * Why `claude` run in this folder might not bill the subscription: the project's settings set an
+ * API key, another provider, or a helper that supplies a key. Null when nothing does. Only key
+ * names are looked at, and no value ever reaches the message.
+ */
+function projectBillingProblem(cwd: string): string | null {
+  for (const file of PROJECT_SETTINGS_FILES) {
+    let text: string;
+    try {
+      text = readFileSync(path.join(cwd, ".claude", file), "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      return `${file} cannot be read, so it is not known whether claude would use your subscription login in this folder`;
+    }
+    let settings: unknown;
+    try {
+      settings = JSON.parse(text);
+    } catch {
+      settings = undefined;
+    }
+    if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
+      return `${file} cannot be read, so it is not known whether claude would use your subscription login in this folder`;
+    }
+    const { env, apiKeyHelper } = settings as { env?: unknown; apiKeyHelper?: unknown };
+    const names = typeof env === "object" && env !== null ? Object.keys(env) : [];
+    const name = BILLING_ENV_VARS.find((billing) => names.includes(billing)) ?? (apiKeyHelper !== undefined ? "apiKeyHelper" : undefined);
+    if (name !== undefined) return `${file} sets ${name}: claude would not use your subscription login in this folder`;
+  }
+  return null;
+}
 
 interface ClaudeResult {
   result?: unknown;
@@ -89,6 +123,9 @@ export class ClaudeCliBackend implements Backend {
 
   /** A headless call inside a repository, with the read-only chat tools. */
   runAgent(req: { prompt: string; cwd: string; timeoutMs: number }): Promise<BackendResult> {
+    // Here claude runs inside the user's project, whose own settings could change who is billed.
+    const problem = projectBillingProblem(req.cwd);
+    if (problem !== null) return Promise.reject(new BackendError("backend_error", problem));
     return this.enqueue(CHAT_ARGS, req);
   }
 
