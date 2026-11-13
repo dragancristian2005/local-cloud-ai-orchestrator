@@ -10,6 +10,12 @@ import type { Backend, BackendRequest, BackendResult } from "../core/types.ts";
 // own login. Credentials are never read here. Flags are documented in docs/claude-cli-flags.md.
 const CLAUDE_BIN = "claude";
 const CLAUDE_ARGS = ["-p", "--output-format", "json", "--tools", "", "--no-session-persistence", "--safe-mode"];
+
+/** The only tools Claude gets in the chat: it can look at the repository, not change it or run anything. */
+export const CHAT_TOOLS = "Read,Grep,Glob";
+// Headless with tools: `--permission-prompts none` makes anything that would ask for permission
+// fail at once instead of waiting for an answer nobody can give.
+const CHAT_ARGS = ["-p", "--output-format", "json", "--tools", CHAT_TOOLS, "--permission-prompts", "none", "--no-session-persistence", "--safe-mode"];
 const HEALTH_TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 2000;
 
@@ -76,7 +82,18 @@ export class ClaudeCliBackend implements Backend {
     });
   }
 
+  /** A stateless call: no tools, and a neutral directory unless one is given. */
   run(req: BackendRequest): Promise<BackendResult> {
+    return this.enqueue(CLAUDE_ARGS, req);
+  }
+
+  /** A headless call inside a repository, with the read-only chat tools. */
+  runAgent(req: { prompt: string; cwd: string; timeoutMs: number }): Promise<BackendResult> {
+    return this.enqueue(CHAT_ARGS, req);
+  }
+
+  /** Every call goes through here: the billing check first, then the one-at-a-time queue. */
+  private enqueue(baseArgs: string[], req: BackendRequest): Promise<BackendResult> {
     const blocking = BILLING_ENV_VARS.find((name) => (process.env[name] ?? "") !== "");
     if (blocking !== undefined) {
       return Promise.reject(
@@ -86,16 +103,16 @@ export class ClaudeCliBackend implements Backend {
         ),
       );
     }
-    const next = queue.then(() => this.runNow(req));
+    const next = queue.then(() => this.runNow(baseArgs, req));
     queue = next.catch(() => {});
     return next;
   }
 
-  private runNow(req: BackendRequest): Promise<BackendResult> {
+  private runNow(baseArgs: string[], req: BackendRequest): Promise<BackendResult> {
     const started = Date.now();
     // A neutral directory by default: the worker gets the prompt and nothing else.
     const ownDir = req.cwd === undefined ? mkdtempSync(path.join(tmpdir(), "orch-claude-")) : undefined;
-    const args = this.cfg.model ? [...CLAUDE_ARGS, "--model", this.cfg.model] : CLAUDE_ARGS;
+    const args = this.cfg.model ? [...baseArgs, "--model", this.cfg.model] : baseArgs;
 
     return new Promise<BackendResult>((resolve, reject) => {
       const child = spawn(this.bin, args, { cwd: req.cwd ?? ownDir, env: process.env, stdio: ["pipe", "pipe", "pipe"] });
