@@ -1,9 +1,14 @@
+import { isSecretPath } from "./secrets.ts";
+
 /** What to do with a command the model asked to run. */
 export type CommandVerdict = { decision: "allow" } | { decision: "ask" } | { decision: "deny"; reason: string };
 
-// `git`, optional global options (including `-C <path>`), then the subcommand.
+// `git`, optional global options, then the subcommand. Global options that take a value
+// (`-C <path>`, `--work-tree <path>`, `--git-dir=<path>`...) are skipped together with it, so
+// the value is not mistaken for the subcommand.
+const GIT_VALUE_OPTIONS = "-C|-c|--work-tree|--git-dir|--namespace|--exec-path";
 function git(subcommand: string): RegExp {
-  return new RegExp(`\\bgit\\s+(?:-C\\s+\\S+\\s+|-\\S+\\s+)*(?:${subcommand})\\b`, "i");
+  return new RegExp(`\\bgit\\s+(?:(?:${GIT_VALUE_OPTIONS})(?:=\\S+|\\s+\\S+)\\s+|-\\S+\\s+)*(?:${subcommand})\\b`, "i");
 }
 
 // Places credentials live, and the secrets files the read tools also refuse.
@@ -19,6 +24,8 @@ const CREDENTIALS = new RegExp(
 
 const SAME_COMMAND = "[^;&|\\n]*"; // stays inside one command of a pipeline or list
 
+const CREDENTIALS_REASON = "commands that touch credentials or secrets files are not allowed";
+
 /**
  * Commands that are never run, whatever the user answers. They enforce the project's hard rules:
  * nothing destructive, no pushing, no touching credentials. This list is a backstop, not a
@@ -26,18 +33,19 @@ const SAME_COMMAND = "[^;&|\\n]*"; // stays inside one command of a pipeline or 
  */
 const ALWAYS_REFUSED: { pattern: RegExp; reason: string }[] = [
   { pattern: new RegExp(`\\brm\\b${SAME_COMMAND}?\\s(-[a-zA-Z]*[rRfF][a-zA-Z]*|--recursive|--force)(?=\\s|$)`), reason: "rm with -r or -f is not allowed" },
-  { pattern: new RegExp(`${git("reset").source}${SAME_COMMAND}--hard`), reason: "git reset --hard is not allowed" },
+  { pattern: new RegExp(`${git("reset").source}${SAME_COMMAND}--ha(r(d)?)?\\b`), reason: "git reset --hard is not allowed" },
   { pattern: git("clean"), reason: "git clean is not allowed" },
   { pattern: git("push"), reason: "git push is not allowed" },
-  { pattern: new RegExp(`${git("checkout").source}${SAME_COMMAND}\\s--(\\s|$)`), reason: "discarding changes with git checkout -- is not allowed" },
+  { pattern: new RegExp(`${git("checkout").source}${SAME_COMMAND}\\s(-f|--force|--|\\.)(?=\\s|$)`), reason: "discarding changes is not allowed" },
+  { pattern: new RegExp(`${git("switch").source}${SAME_COMMAND}\\s(-f|--force|--discard-changes)(?=\\s|$)`), reason: "discarding changes is not allowed" },
   { pattern: git("restore"), reason: "discarding changes with git restore is not allowed" },
   { pattern: new RegExp(`${git("stash").source}\\s+(drop|clear)\\b`), reason: "dropping stashes is not allowed" },
   { pattern: /\bsudo\b/, reason: "sudo is not allowed" },
-  { pattern: /\|\s*(sh|bash|zsh)\b/, reason: "piping into a shell is not allowed" },
-  { pattern: new RegExp(`\\bch(mod|own)\\b${SAME_COMMAND}\\s-[a-zA-Z]*R`), reason: "recursive chmod/chown is not allowed" },
-  { pattern: /\b(mkfs\S*|shutdown|reboot)\b/, reason: "system commands are not allowed" },
+  { pattern: /\|\s*(\S*\/)?(env\s+)?(sh|bash|zsh)\b/, reason: "piping into a shell is not allowed" },
+  { pattern: new RegExp(`\\bch(mod|own)\\b${SAME_COMMAND}\\s(-[a-zA-Z]*R|--recursive)`), reason: "recursive chmod/chown is not allowed" },
+  { pattern: /(^|[;&|])\s*(mkfs\S*|shutdown|reboot)\b/, reason: "system commands are not allowed" },
   { pattern: new RegExp(`\\bdd\\b${SAME_COMMAND}\\bif=`), reason: "dd is not allowed" },
-  { pattern: CREDENTIALS, reason: "commands that touch credentials or secrets files are not allowed" },
+  { pattern: CREDENTIALS, reason: CREDENTIALS_REASON },
 ];
 
 // What takes an allow-listed command out of its harmless form: a path outside the repository, or
@@ -61,9 +69,21 @@ function isSafeArgument(arg: string): boolean {
 }
 
 // Characters that can make a terminal show something other than the text: control codes
-// (escape, carriage return, backspace, newline...), and invisible or direction-changing Unicode.
+// (escape, carriage return, backspace, newline...), Unicode line separators, and invisible or
+// direction-changing Unicode.
 // The approval prompt is the user's only view of a command, so such a command is never run.
-const UNSHOWABLE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
+const UNSHOWABLE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2069\ufeff]/;
+
+// Longer than this and the user cannot be expected to read all of it before approving.
+const MAX_COMMAND_CHARS = 1000;
+
+// A word of the command that is written as a path (it has a slash or a dot) and names a secrets
+// file. A bare word such as "credentials" is not a path.
+function namesSecretsFile(command: string): boolean {
+  return command
+    .split(/[\s"'`:=]+/)
+    .some((piece) => /[/.]/.test(piece) && isSecretPath(piece));
+}
 
 const COMMITS_ON_MAIN = git("commit|merge|rebase|cherry-pick|revert|am");
 
@@ -78,15 +98,17 @@ const SHELL_SYNTAX = /[;&|><$`(){}\\\n"'*?[\]!#]/;
  */
 export function classifyCommand(
   command: string,
-  opts: { allowCommands: string[]; onMainBranch: boolean },
+  opts: { allowCommands: string[]; onMainBranch: boolean; gitRepository?: boolean },
 ): CommandVerdict {
   if (UNSHOWABLE.test(command)) {
     return { decision: "deny", reason: "the command contains control or invisible characters; write it on one plain line" };
   }
+  if (command.length > MAX_COMMAND_CHARS) return { decision: "deny", reason: "the command is too long to review" };
   // Case is ignored throughout: on macOS "RM" runs rm and ".ENV" opens .env.
   for (const rule of ALWAYS_REFUSED) {
     if (new RegExp(rule.pattern.source, "i").test(command)) return { decision: "deny", reason: rule.reason };
   }
+  if (namesSecretsFile(command)) return { decision: "deny", reason: CREDENTIALS_REASON };
   if (opts.onMainBranch && COMMITS_ON_MAIN.test(command)) {
     return { decision: "deny", reason: "commits are not made on the main branch" };
   }
@@ -95,6 +117,9 @@ export function classifyCommand(
   // arguments that stay inside the repository and cannot write or execute anything.
   const plain = command.trim();
   if (SHELL_SYNTAX.test(plain)) return { decision: "ask" };
+  // Outside a repository git's read commands are not confined to one: `git diff a b` compares
+  // any two files. So nothing git does there is approved without asking.
+  if (opts.gitRepository === false && /^git(\s|$)/i.test(plain)) return { decision: "ask" };
   const entry = opts.allowCommands.find((listed) => plain === listed || plain.startsWith(`${listed} `));
   if (entry === undefined) return { decision: "ask" };
   const args = plain.slice(entry.length).trim().split(/\s+/).filter((arg) => arg !== "");
