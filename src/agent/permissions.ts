@@ -1,7 +1,8 @@
 import { isSecretPath } from "./secrets.ts";
+import type { Verdict } from "./toolkit.ts";
 
 /** What to do with a command the model asked to run. */
-export type CommandVerdict = { decision: "allow" } | { decision: "ask" } | { decision: "deny"; reason: string };
+export type CommandVerdict = Verdict;
 
 // `git`, optional global options, then the subcommand. Global options that take a value
 // (`-C <path>`, `--work-tree <path>`, `--git-dir=<path>`...) are skipped together with it, so

@@ -1,20 +1,12 @@
 import { openSync, readSync, closeSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { isSecretPath } from "./secrets.ts";
+import { ASK_CLAUDE_TOOL, MAX_TOOL_RESULT_CHARS, ToolError } from "./toolkit.ts";
+import type { ToolDefinition } from "./toolkit.ts";
 
-/** A tool definition in the shape Ollama's /api/chat expects. */
-export interface ToolDefinition {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: {
-      type: "object";
-      required: string[];
-      properties: Record<string, { type: string; description: string }>;
-    };
-  };
-}
+// Moved to toolkit.ts; re-exported so existing imports keep working.
+export { MAX_TOOL_RESULT_CHARS, ToolError };
+export type { ToolDefinition };
 
 function tool(
   name: string,
@@ -56,16 +48,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     { command: { type: "string", description: "The command line to run" } },
     ["command"],
   ),
-  tool(
-    "ask_claude",
-    "Hand this request to a stronger assistant. Use it when the task is beyond you or you are not making progress.",
-    { reason: { type: "string", description: "One line: why you cannot finish this yourself" } },
-    ["reason"],
-  ),
+  ASK_CLAUDE_TOOL,
 ];
-
-/** The most a single tool result may add to the conversation. */
-export const MAX_TOOL_RESULT_CHARS = 4500;
 
 const MAX_LINES_PER_READ = 200;
 const MAX_LINE_CHARS = 400;
@@ -78,14 +62,6 @@ const BINARY_SNIFF_BYTES = 8000;
 // Folders a search does not walk into: dependencies, virtual environments and build output.
 // Naming one of them as "path" still searches it.
 const SKIPPED_DIRS = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", "target", "dist", ".next", ".cache"]);
-
-/** A problem the model can act on. The agent loop turns it into an "error: ..." tool result. */
-export class ToolError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ToolError";
-  }
-}
 
 function isInside(root: string, target: string): boolean {
   return target === root || target.startsWith(root + path.sep);
