@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runAgentTurn, SYSTEM_PROMPT } from "../src/agent/loop.ts";
+import { CODING_SYSTEM_PROMPT as SYSTEM_PROMPT, codingToolkit } from "../src/agent/coding-toolkit.ts";
+import { runAgentTurn } from "../src/agent/loop.ts";
 import type { AgentEvent, Approval } from "../src/agent/loop.ts";
 import type { ChatMessage } from "../src/agent/messages.ts";
 import { MAX_TOOL_RESULT_CHARS } from "../src/agent/tools.ts";
@@ -39,9 +40,9 @@ function setup(replies: Array<Partial<ChatResult> | BackendError>, over: { appro
     backend, messages, approvals, events, root,
     run: () =>
       runAgentTurn({
-        backend, messages, root,
-        maxSteps: over.maxSteps ?? 8, historyTokenBudget: 5000, commandTimeoutMs: 5000,
-        allowCommands: over.allowCommands ?? ["git status", "ls", "pwd"], sessionAllowed, onMainBranch: false,
+        backend, messages,
+        toolkit: codingToolkit({ root, commandTimeoutMs: 5000, allowCommands: over.allowCommands ?? ["git status", "ls", "pwd"], onMainBranch: false }),
+        maxSteps: over.maxSteps ?? 8, historyTokenBudget: 5000, sessionAllowed,
         approve: async (command) => {
           approvals.push(command);
           return over.approve ?? "no";
@@ -229,10 +230,9 @@ test("the main-branch rule is checked for each command, not once", async () => {
   const messages: ChatMessage[] = [{ role: "user", content: "commit twice" }];
   let checks = 0;
   await runAgentTurn({
-    backend, messages, root, maxSteps: 8, historyTokenBudget: 5000, commandTimeoutMs: 5000,
-    allowCommands: [], sessionAllowed: new Set(),
+    backend, messages, maxSteps: 8, historyTokenBudget: 5000, sessionAllowed: new Set(),
     // Off main for the first command; on main by the time of the second (someone switched branch).
-    onMainBranch: async () => ++checks > 1,
+    toolkit: codingToolkit({ root, commandTimeoutMs: 5000, allowCommands: [], onMainBranch: async () => ++checks > 1 }),
     approve: async () => "no",
   });
   const results = messages.filter((m) => m.role === "tool").map((m) => m.content);
@@ -268,8 +268,8 @@ test("outside a git repository an allow-listed git command asks first", async ()
   const messages: ChatMessage[] = [{ role: "user", content: "status?" }];
   const asked: string[] = [];
   await runAgentTurn({
-    backend, messages, root, maxSteps: 8, historyTokenBudget: 5000, commandTimeoutMs: 5000,
-    allowCommands: ["git status"], sessionAllowed: new Set(), onMainBranch: false, gitRepository: async () => false,
+    backend, messages, maxSteps: 8, historyTokenBudget: 5000, sessionAllowed: new Set(),
+    toolkit: codingToolkit({ root, commandTimeoutMs: 5000, allowCommands: ["git status"], onMainBranch: false, gitRepository: async () => false }),
     approve: async (command) => {
       asked.push(command);
       return "no";
