@@ -67,3 +67,10 @@ test("appendArtifact appends lines to a file in the run's directory", () => {
   assert.equal(rel, "runs/session-1/transcript.jsonl");
   assert.equal(readFileSync(path.join(dir, "session-1", "transcript.jsonl"), "utf8"), '{"a":1}\n{"a":2}\n');
 });
+
+test("writeArtifact saves a file in the run's directory and returns its absolute path", () => {
+  const dir = tempRunsDir();
+  const file = new RunLog(dir).writeArtifact("run-1", "change.patch", "x");
+  assert.equal(file, path.resolve(dir, "run-1", "change.patch"));
+  assert.equal(readFileSync(file, "utf8"), "x");
+});

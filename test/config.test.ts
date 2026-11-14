@@ -103,3 +103,22 @@ test("rejects invalid agent settings", () => {
   assert.throws(() => loadConfig(writeConfig({ ...BASE, agent: { allowCommands: ["ok", 5] } })), ConfigError);
   assert.throws(() => loadConfig(writeConfig({ ...BASE, agent: { commandTimeoutMs: -1 } })), ConfigError);
 });
+
+test("repos defaults to none and loads a repository's test settings", () => {
+  assert.deepEqual(loadConfig(writeConfig(BASE)).repos, {});
+  const repos = { "/work/app": { testCommand: "npm test", linkPaths: ["node_modules"], testTimeoutMs: 60000 }, "/work/lib": {} };
+  assert.deepEqual(loadConfig(writeConfig(BASE, { repos })).repos, repos);
+});
+
+test("rejects invalid repos settings", () => {
+  const bad = [
+    { "/work/app": { testCommand: 42 } },
+    { "/work/app": { testCommand: "  " } },
+    { "/work/app": { linkPaths: "node_modules" } },
+    { "/work/app": { linkPaths: [1] } },
+    { "/work/app": { testTimeoutMs: 0 } },
+    { "/work/app": "npm test" },
+    ["npm test"],
+  ];
+  for (const repos of bad) assert.throws(() => loadConfig(writeConfig({ ...BASE, repos })), ConfigError, JSON.stringify(repos));
+});

@@ -7,6 +7,7 @@
     "commit-message": ["pc-ollama", "claude"],
     "docstring": ["pc-ollama", "claude"],
     "test-stub": ["pc-ollama", "claude"],
+    "small-edit": ["pc-ollama", "claude"],
     "chat": ["pc-ollama", "claude"]
   },
   "retryBeforeEscalate": 1

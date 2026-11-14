@@ -26,6 +26,16 @@ export interface OrchestratorConfig {
   promptTokenBudget: number;
   runsDir: string;
   agent: AgentConfig;
+  /** Per repository, keyed by its absolute root: how small-edit tests a change there. */
+  repos: Record<string, RepoConfig>;
+}
+
+export interface RepoConfig {
+  /** The project's own test command. The only thing small-edit runs through a shell. */
+  testCommand?: string;
+  /** Ignored paths (dependencies) to symlink from the checkout into the worktree. */
+  linkPaths?: string[];
+  testTimeoutMs?: number;
 }
 
 /** Settings for the chat: how far the local model may go on its own. */
@@ -175,6 +185,27 @@ function parseAgent(raw: unknown): AgentConfig {
   };
 }
 
+function parseRepos(raw: unknown): Record<string, RepoConfig> {
+  if (raw === undefined) return {};
+  if (!isObject(raw)) throw new ConfigError(`"repos" must be an object keyed by repository path`);
+  const repos: Record<string, RepoConfig> = {};
+  for (const [root, value] of Object.entries(raw)) {
+    const where = `repos["${root}"]`;
+    if (!isObject(value)) throw new ConfigError(`${where} must be an object`);
+    const repo: RepoConfig = {};
+    if (value.testCommand !== undefined) repo.testCommand = nonEmptyString(value.testCommand, `${where}.testCommand`);
+    if (value.linkPaths !== undefined) {
+      if (!Array.isArray(value.linkPaths) || value.linkPaths.some((entry) => typeof entry !== "string" || entry.trim() === "")) {
+        throw new ConfigError(`${where}.linkPaths must be an array of paths, for example ["node_modules"]`);
+      }
+      repo.linkPaths = value.linkPaths as string[];
+    }
+    if (value.testTimeoutMs !== undefined) repo.testTimeoutMs = positiveNumber(value.testTimeoutMs, `${where}.testTimeoutMs`);
+    repos[root] = repo;
+  }
+  return repos;
+}
+
 /**
  * Load the config file, merge `orchestrator.local.json` from the same directory over it if present,
  * apply defaults and validate. With no argument, reads `config/orchestrator.config.json` in the project.
@@ -223,5 +254,6 @@ export function loadConfig(file: string = DEFAULT_CONFIG_PATH): OrchestratorConf
     promptTokenBudget: budget,
     runsDir: path.resolve(PROJECT_ROOT, runsDir),
     agent: parseAgent(raw.agent),
+    repos: parseRepos(raw.repos),
   };
 }

@@ -34,6 +34,14 @@ export class RunLog {
     return [path.basename(this.runsDir), runId, name].join("/");
   }
 
+  /** Save a whole file in a run's directory. Returns its absolute path. */
+  writeArtifact(runId: string, name: string, text: string): string {
+    const file = path.resolve(this.runsDir, runId, name);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, text);
+    return file;
+  }
+
   append(rec: AttemptRecord): void {
     mkdirSync(this.runsDir, { recursive: true });
     appendFileSync(this.logFile, JSON.stringify(rec) + "\n");
