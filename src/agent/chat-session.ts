@@ -2,11 +2,13 @@ import type { AgentConfig } from "../core/config.ts";
 import { BackendError } from "../core/types.ts";
 import type { AttemptRecord, BackendResult, ChatBackend, FallbackReason } from "../core/types.ts";
 import type { RunLog } from "../log/run-log.ts";
+import { codingToolkit } from "./coding-toolkit.ts";
 import { renderTranscript } from "./history.ts";
 import { runAgentTurn } from "./loop.ts";
 import type { AgentEvent, Approval, EscalationReason } from "./loop.ts";
 import type { ChatMessage } from "./messages.ts";
 import { looksLikeGivingUp, REASON_TEXT, route } from "./router.ts";
+import type { Toolkit } from "./toolkit.ts";
 
 /** What the chat needs from the Claude backend: a headless call inside the repository. */
 export interface CloudAgent {
@@ -63,9 +65,17 @@ export class ChatSession {
   private cloudCalls = 0;
   private transcriptPath: string | null = null;
   private readonly sessionAllowed = new Set<string>();
+  private readonly toolkit: Toolkit;
 
   constructor(opts: ChatSession["opts"]) {
     this.opts = opts;
+    this.toolkit = codingToolkit({
+      root: opts.root,
+      commandTimeoutMs: opts.agent.commandTimeoutMs,
+      allowCommands: opts.agent.allowCommands,
+      onMainBranch: opts.onMainBranch,
+      gitRepository: opts.gitRepository,
+    });
     this.sessionId = opts.log.newRunId();
   }
 
@@ -92,14 +102,10 @@ export class ChatSession {
     const result = await runAgentTurn({
       backend: local,
       messages: this.messages,
-      root: this.opts.root,
+      toolkit: this.toolkit,
       maxSteps: agent.maxSteps,
       historyTokenBudget: agent.historyTokenBudget,
-      commandTimeoutMs: agent.commandTimeoutMs,
-      allowCommands: agent.allowCommands,
       sessionAllowed: this.sessionAllowed,
-      onMainBranch: this.opts.onMainBranch,
-      gitRepository: this.opts.gitRepository,
       signal: this.opts.signal,
       approve: this.opts.approve,
       onEvent: (event) => {

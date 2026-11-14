@@ -1,5 +1,5 @@
 import type { ChatMessage, ToolCall } from "../agent/messages.ts";
-import type { ToolDefinition } from "../agent/tools.ts";
+import type { ToolDefinition } from "../agent/toolkit.ts";
 
 export type FallbackReason =
   | "pc_unreachable" | "timeout" | "verify_failed" | "backend_error"
