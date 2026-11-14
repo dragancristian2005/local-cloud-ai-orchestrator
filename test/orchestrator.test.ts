@@ -185,3 +185,29 @@ test("run mode leaves taskId null and reports progress", async () => {
   assert.match(lines[0]!, /^tier 0 pc \(pc-model\): pass/);
   assert.ok(existsSync(path.join(runsDir, "log.jsonl")));
 });
+
+test("runTask awaits an async verifier", async () => {
+  const { log } = setup();
+  let calls = 0;
+  const asyncTask: PreparedTask = {
+    ...task,
+    verify: async () => (++calls === 1 ? { status: "fail", detail: "tests failed" } : { status: "pass", detail: "" }),
+  };
+  const local = fakeBackend({ id: "pc", replies: ["one", "two"] });
+  const outcome = await runTask({ ...common, task: asyncTask, chain: [local], log });
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.attempts.length, 2);
+  assert.deepEqual(outcome.attempts.map((a) => a.verify), ["fail", "pass"]);
+  assert.equal(outcome.attempts[0]!.verifyDetail, "tests failed");
+});
+
+test("runTask uses a given runId", async () => {
+  const { log, runsDir } = setup();
+  const local = fakeBackend({ id: "pc", replies: ["Added x.", "Add x"] });
+  const outcome = await runTask({ ...common, chain: [local], log, runId: "fixed-id" });
+  assert.equal(outcome.runId, "fixed-id");
+  assert.deepEqual(outcome.attempts.map((a) => a.runId), ["fixed-id", "fixed-id"]);
+  assert.equal(outcome.attempts[0]!.outputFile, "runs/fixed-id/tier0-attempt0.txt");
+  assert.equal(existsSync(path.join(runsDir, "fixed-id", "tier1-attempt0.txt")), false);
+  assert.equal(existsSync(path.join(runsDir, "fixed-id", "tier0-attempt1.txt")), true);
+});

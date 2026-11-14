@@ -1,7 +1,7 @@
 import { estimateTokens, fitDiff, fitStat } from "../core/context.ts";
 import { maxLines, noCodeFence, nonEmpty, runChecks } from "../core/verifier.ts";
 import type { Check } from "../core/verifier.ts";
-import type { PreparedTask, TaskInput } from "../core/types.ts";
+import type { CheckedTask, TaskInput } from "../core/types.ts";
 import { cleanModelOutput } from "./clean.ts";
 import type { TaskModule } from "./task.ts";
 
@@ -98,7 +98,7 @@ function normalize(raw: string): string {
 
 export const commitMessage: TaskModule = {
   type: "commit-message",
-  prepare(input: TaskInput, budgetTokens: number): PreparedTask {
+  prepare(input: TaskInput, budgetTokens: number): CheckedTask {
     // The file list gets at most a sixth of the prompt; the diff gets the rest.
     const stat = fitStat(input.stat ?? "", Math.floor(budgetTokens / 6));
     // What the template and the stat use is not available to the diff; 2 tokens cover rounding.

@@ -21,6 +21,8 @@ export interface RunTaskOptions {
   repo: string | null;
   mode: "run" | "eval";
   taskId?: string;
+  /** The run's id, when the caller already made one (default: a new one). */
+  runId?: string;
   onProgress?: (line: string) => void;
   /** The escalation policy. Defaults to decideNext; tests pass their own. */
   decide?: (state: PolicyState) => Decision;
@@ -66,7 +68,7 @@ async function isHealthy(backend: Backend): Promise<boolean> {
 export async function runTask(opts: RunTaskOptions): Promise<RunOutcome> {
   const { task, chain, log } = opts;
   const decide = opts.decide ?? decideNext;
-  const runId = log.newRunId();
+  const runId = opts.runId ?? log.newRunId();
   const attempts: AttemptRecord[] = [];
 
   async function attemptOnce(backend: Backend, tier: number, attempt: number, prompt: string): Promise<AttemptResult> {
@@ -98,7 +100,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunOutcome> {
     const text = task.normalize(result.text);
     if (!task.verify) return { fields, accepted: text };
 
-    const verdict = task.verify(text);
+    const verdict = await task.verify(text);
     fields.verify = verdict.status;
     fields.verifyDetail = verdict.detail;
     return verdict.status === "pass"

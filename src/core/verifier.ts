@@ -1,5 +1,14 @@
 import type { VerifyResult } from "./types.ts";
 
+// The shell-command verifier: run the project's own test command and look at its exit code.
+export { runCommand } from "./command.ts";
+export type { CommandResult } from "./command.ts";
+
+/** The end of a failed command's output: what a model, or a person, needs to see to fix it. */
+export function failureTail(output: string, maxLines = 30, maxChars = 1500): string {
+  return output.trimEnd().split("\n").slice(-maxLines).join("\n").slice(-maxChars);
+}
+
 /** A format check: null when the output is fine, otherwise a short reason a model could act on. */
 export type Check = (output: string) => string | null;
 

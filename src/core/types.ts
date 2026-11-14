@@ -81,7 +81,12 @@ export interface PreparedTask {
   prompt: string;
   normalize(raw: string): string;
   /** Absent = verifier kind "none": the attempt is logged as "skipped" and accepted. */
-  verify?(output: string): VerifyResult;
+  verify?(output: string): VerifyResult | Promise<VerifyResult>;
+}
+
+/** What a task module prepares: its format checks are synchronous and always present. */
+export interface CheckedTask extends PreparedTask {
+  verify(output: string): VerifyResult;
 }
 
 export interface AttemptRecord {

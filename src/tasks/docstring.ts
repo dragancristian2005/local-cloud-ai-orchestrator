@@ -1,7 +1,7 @@
 import { estimateTokens, fitSource } from "../core/context.ts";
 import { maxLines, noCodeFence, nonEmpty, runChecks } from "../core/verifier.ts";
 import type { Check } from "../core/verifier.ts";
-import type { PreparedTask, TaskInput } from "../core/types.ts";
+import type { CheckedTask, TaskInput } from "../core/types.ts";
 import { cleanModelOutput } from "./clean.ts";
 import { fileAndSymbol, languageOf } from "./language.ts";
 import type { Language } from "./language.ts";
@@ -52,7 +52,7 @@ const hasDescription: Check = (out) => {
 
 export const docstring: TaskModule = {
   type: "docstring",
-  prepare(input: TaskInput, budgetTokens: number): PreparedTask {
+  prepare(input: TaskInput, budgetTokens: number): CheckedTask {
     const { filePath, symbol } = fileAndSymbol(input, "docstring");
     const language = languageOf(filePath);
     const source = fitSource(input.text, symbol, Math.max(0, budgetTokens - estimateTokens(TEMPLATE) - 20));
