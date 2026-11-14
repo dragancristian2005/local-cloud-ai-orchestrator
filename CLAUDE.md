@@ -118,6 +118,7 @@ Multi-backend adapters for other CLIs, a web UI, benchmarks like SWE-bench (too 
 - **Log record:** the fields above plus `attempt`, `mode` (`run` | `eval`) and `taskId`. Raw outputs are `runs/<runId>/tier<N>-attempt<M>.txt`. For an attempt that produced no output (unreachable, timeout, backend error), `verifyDetail` holds the error message.
 - **Verifier rules:** in each file under `src/tasks/`. The shell-command verifier arrives with M4.
 - **Claude flags:** `docs/claude-cli-flags.md`. Never `--bare` (it ignores the subscription login). The Claude backend refuses to run while `ANTHROPIC_API_KEY` or a similar billing/gateway variable is set; it checks names only.
+- **Agent harness:** the loop in `src/agent/loop.ts` is generic. It receives a toolkit (`src/agent/toolkit.ts`): tools, a system prompt, and one policy that answers allow, ask or deny for every tool call; a tool the policy does not know is asked. The coding tools and rules are one toolkit (`src/agent/coding-toolkit.ts`). A second toolkit, or a separate package, waits until a second harness exists.
 
 ## Working on this repo
 - `npm test` runs everything with a fake Ollama server and a fake `claude` binary; it needs neither the PC nor the real CLI. `npm run typecheck` runs `tsc --noEmit`.
