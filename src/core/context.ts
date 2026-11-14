@@ -97,7 +97,7 @@ export function fitStat(stat: string, budgetTokens: number): string {
 }
 
 /** The line (0-based) where a symbol is declared, or -1. Falls back to its first call or assignment. */
-function findSymbolLine(lines: string[], symbol: string): number {
+export function findSymbolLine(lines: string[], symbol: string): number {
   const name = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const declaration = new RegExp(`\\b(function|class|const|let|var|def|interface|type)\\s+\\*?\\s*${name}\\b`);
   const index = lines.findIndex((line) => declaration.test(line));
