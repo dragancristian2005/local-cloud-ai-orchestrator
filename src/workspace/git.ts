@@ -2,7 +2,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { InputError } from "../core/types.ts";
 
-// Read-only git queries. Nothing here may modify a repository (writes arrive with M4, on a throwaway branch).
+// Read-only git queries. Nothing here may modify a repository. The only git writes are in
+// edit-workspace.ts, inside a worktree it created.
 
 const run = promisify(execFile);
 const MAX_BUFFER = 20 * 1024 * 1024;
@@ -57,4 +58,25 @@ export async function isWorkTree(dir: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The top-level directory of the repository a folder belongs to. */
+export async function repoRoot(dir: string): Promise<string> {
+  try {
+    return (await git(dir, ["rev-parse", "--show-toplevel"])).trim();
+  } catch (err) {
+    if (err instanceof InputError && /not installed/.test(err.message)) throw err;
+    throw new InputError(`not a git repository: ${dir}`);
+  }
+}
+
+/**
+ * An edit is based on HEAD, so the file must be committed and unchanged: otherwise the patch
+ * would silently ignore the user's unsaved work.
+ */
+export async function assertEditable(root: string, file: string): Promise<void> {
+  const tracked = await git(root, ["ls-files", "--", file]);
+  if (tracked.trim() === "") throw new InputError(`${file} is not tracked by git: commit it first`);
+  const status = await git(root, ["status", "--porcelain", "--", file]);
+  if (status.trim() !== "") throw new InputError(`${file} has uncommitted changes: commit or stash them first`);
 }

@@ -28,3 +28,14 @@ export async function makeTempRepo(
 export function makeTempDir(): string {
   return mkdtempSync(path.join(tmpdir(), "orch-dir-"));
 }
+
+/** Commit everything in a temp repository, with a fixed identity so it works on any machine. */
+export async function commitAll(repo: string, message = "init"): Promise<void> {
+  await run("git", ["-C", repo, "add", "-A"]);
+  await run("git", ["-C", repo, "-c", "user.name=orch-test", "-c", "user.email=orch-test@localhost", "-c", "commit.gpgsign=false", "commit", "-q", "-m", message]);
+}
+
+/** Run git in a repository and return its trimmed output. */
+export async function gitOut(repo: string, ...args: string[]): Promise<string> {
+  return (await run("git", ["-C", repo, ...args])).stdout.trim();
+}
