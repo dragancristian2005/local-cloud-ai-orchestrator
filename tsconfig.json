@@ -17,7 +17,8 @@
   "include": [
     "src",
     "test",
-    "eval"
+    "eval",
+    ".claude/scripts"
   ],
   "exclude": [
     "eval/fixed-tasks"
