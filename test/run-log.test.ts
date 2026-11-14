@@ -58,3 +58,12 @@ test("newRunId is unique and sortable by time", () => {
   assert.notEqual(a, b);
   assert.match(a, /^\d{8}-\d{6}-[0-9a-f]{6}$/);
 });
+
+test("appendArtifact appends lines to a file in the run's directory", () => {
+  const dir = tempRunsDir();
+  const log = new RunLog(dir);
+  const rel = log.appendArtifact("session-1", "transcript.jsonl", '{"a":1}');
+  log.appendArtifact("session-1", "transcript.jsonl", '{"a":2}');
+  assert.equal(rel, "runs/session-1/transcript.jsonl");
+  assert.equal(readFileSync(path.join(dir, "session-1", "transcript.jsonl"), "utf8"), '{"a":1}\n{"a":2}\n');
+});

@@ -1,13 +1,25 @@
 # Tiered Coding Orchestrator
 
-`orch` runs a small coding task on the cheapest backend that can do it, checks the answer, and
-moves to a stronger backend only when the check fails.
+`orch` answers with the cheapest backend that can do the job, and moves to a stronger one only when
+it has to.
 
-- **Tier 0:** a local model served by Ollama on a separate PC on your home network.
-- **Tier 1:** the official `claude` CLI on your Mac, with your own login.
+- **Local:** a model served by Ollama on a separate PC on your home network.
+- **Claude:** the official `claude` CLI on your Mac, with your own login.
 
 Zero money spent: no API keys, no billing. The design and its hard rules are in
 [CLAUDE.md](CLAUDE.md).
+
+```
+$ cd ~/dev/my-project
+$ orch
+> what does the retry helper do?
+  [search retry]
+  [read_file src/http/retry.ts]
+local> It retries a failed request up to three times ...
+> make it give up immediately on a 401
+(to claude: the request needs more than the local model)
+claude> Here is the change as a diff: ...
+```
 
 ## Requirements
 
@@ -17,7 +29,75 @@ Zero money spent: no API keys, no billing. The design and its hard rules are in
 
 **First time? Follow the step-by-step tutorial: [docs/SETUP.md](docs/SETUP.md).**
 
-## Commands
+## The chat
+
+Type `orch` in a project folder. It opens a conversation, like typing `claude`, and decides for
+each message whether the local model or Claude answers. The label in front of each answer says
+who it was.
+
+**How it decides**
+
+1. The PC is off, asleep or erroring: Claude.
+2. The message is too long for the local model: Claude.
+3. Otherwise one quick call asks the local model to label the request `LOCAL` or `CLAUDE`.
+4. While the local model works, the turn goes to Claude if the model asks for help, gets stuck
+   in its tools, or answers with a refusal.
+
+What this cannot do: notice when a small model answers wrongly with confidence. When an answer
+looks off, type `/claude` and Claude answers the same message again.
+
+**What the local model can do**
+
+| Tool | Asks you first? |
+|---|---|
+| read a file, list a folder, search for text | no; only inside the project, never `.env`, keys or `.git/` |
+| run a command | yes, unless it is on the allow-list |
+
+`git diff` and `git log -p` show whatever is tracked, so a secrets file that was committed can
+still appear in their output.
+
+At the prompt `Run this command? ...  [y]es / [n]o / [a]lways:` answer `y` to run it, `n` to refuse,
+`a` to stop being asked for that exact command in this session.
+
+The allow-list starts as `git status`, `git diff`, `git log`, `ls`, `pwd`, in their plain form: no
+shell operators, quotes or wildcards, and no path that leaves the project. Add your own in
+`config/orchestrator.local.json`:
+
+```json
+{ "agent": { "allowCommands": ["git status", "git diff", "git log", "ls", "pwd", "npm test"] } }
+```
+
+The common forms of some commands are refused whatever you answer: `rm` with `-r` or `-f`,
+`git reset --hard`, `git clean`, `git push`, discarding changes, commits while on `main`, `sudo`,
+and commands that name a credentials or secrets file. Other spellings of the same thing reach you
+as a normal approval prompt, so read a command before you approve it.
+
+A command is stopped after 60 seconds (`agent.commandTimeoutMs`). Ctrl-C leaves the chat and stops
+a running command.
+
+Pasted lines are sent as one message. When input is piped instead of typed, at most three messages
+per session are handed to Claude.
+
+Each session's transcript, including the file contents and command output the tools returned, is
+kept in `runs/<session id>/transcript.jsonl`.
+
+**What Claude can do in the chat**
+
+Claude runs headless in the project folder with three read-only tools (`Read`, `Grep`, `Glob`).
+It cannot change files or run commands; when a change is needed it shows a diff for you to apply.
+Unlike the local tools, Claude's `Read` can open any file in the project, including `.env`.
+
+In a project whose `.claude/settings.json` sets an API key or another provider, the hand-over to
+Claude is refused, so it cannot bill anything.
+
+**Commands:** `/claude` (redo the last answer with Claude), `/clear`, `/help`, `/exit`.
+
+`orch report --mode chat` shows how many turns the local model kept and how many it handed over.
+
+**The local model needs tool-calling support.** Ollama's own examples use `qwen3`. A model without
+it gets a clear error, and every message then goes to Claude.
+
+## Single tasks
 
 ```sh
 # A commit message for whatever is staged. The message is the only thing on stdout.
@@ -80,8 +160,8 @@ To try another model, pass `--model <name>` for one run, or change `model` in th
 | avg s | average time per attempt |
 | pc down | attempts skipped because the PC was off or asleep; not counted anywhere else |
 
-What you stage, or the file you name, is sent to the model: to your PC, and to Claude when a run
-escalates. Do not stage secrets.
+What you stage, the file you name, and whatever the chat's tools read is sent to a model: to your
+PC, and to Anthropic when Claude answers. Do not stage secrets.
 
 ## Rules this project keeps
 
@@ -91,7 +171,8 @@ escalates. Do not stage secrets.
   an API key or reroute the call) is set, so an escalation can never cost money.
 - Claude calls run one at a time, and `orch eval` refuses cloud backends.
 - Ollama is never exposed to the internet.
-- `orch` only reads your repositories. It never writes, commits or changes branches.
+- `orch` itself only reads your repositories. In the chat, a file can change only through a
+  command you approved; Claude gets read-only tools and nothing else.
 
 ## Development
 

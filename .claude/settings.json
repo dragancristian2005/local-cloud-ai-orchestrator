@@ -4,10 +4,6 @@
     "typescript-lsp@claude-plugins-official": true,
     "code-review@claude-plugins-official": true,
     "feature-dev@claude-plugins-official": true,
-    "mcp-server-dev@claude-plugins-official": true,
-    "context7@claude-plugins-official": true,
-    "terraform@claude-plugins-official": true,
-    "frontend-design@claude-plugins-official": true,
     "security-guidance@claude-plugins-official": true,
     "code-simplifier@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
@@ -39,6 +35,21 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|mcp__.*create_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/security-review.ts check"
+          }
+        ]
+      }
     ]
+  },
+  "env": {
+    "ENABLE_STOP_REVIEW": "0",
+    "ENABLE_COMMIT_REVIEW": "0"
   }
 }

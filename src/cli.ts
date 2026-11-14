@@ -1,8 +1,14 @@
 #!/usr/bin/env node
+import { realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { formatEvalTable, loadFixedTasks, runEval } from "../eval/compare.ts";
+import { ChatSession } from "./agent/chat-session.ts";
+import { runRepl } from "./agent/repl.ts";
 import { createBackend } from "./backends/backend.ts";
+import { ClaudeCliBackend } from "./backends/claude-cli.ts";
+import { OllamaBackend } from "./backends/ollama.ts";
 import { loadConfig, PROJECT_ROOT } from "./core/config.ts";
 import { collectInput } from "./core/context.ts";
 import { runTask } from "./core/orchestrator.ts";
@@ -10,10 +16,14 @@ import { BackendError, ConfigError, InputError } from "./core/types.ts";
 import { formatTable, summarize } from "./log/report.ts";
 import { RunLog } from "./log/run-log.ts";
 import { taskModules } from "./tasks/task.ts";
+import { currentBranch, isWorkTree } from "./workspace/git.ts";
 
 const USAGE = `usage: orch <command> [options]
 
+Typed alone in a terminal, orch opens the chat in the current folder.
+
 commands:
+  chat    talk to the local model; harder requests go to Claude
   run     run one task through its chain of backends and print the result
   eval    run the fixed task set against one local backend, to compare models
   report  print pass rate, escalation rate and average time per model, from the log
@@ -28,15 +38,20 @@ orch run --type <task type> [--repo <path>] [--file <path>] [--symbol <name>]
   --config   config file (default: config/orchestrator.config.json in the project)
   --model    use this model on the Ollama backends instead of the configured one
 
+orch chat [--repo <path>] [--model <name>] [--config <path>]
+
+  --repo     the project folder to work in (default: current directory)
+  --model    use this local model instead of the configured one
+
 orch eval --backend <name> [--model <name>] [--type <task type>] [--config <path>]
 
   --backend  a local backend from the config (cloud backends are refused)
   --model    evaluate this model instead of the configured one
   --type     only the fixed tasks of this task type
 
-orch report [--mode run|eval] [--type <task type>] [--config <path>]
+orch report [--mode run|eval|chat] [--type <task type>] [--config <path>]
 
-  --mode     only records from "orch run" or only from "orch eval" (default: both)
+  --mode     run, eval or chat: only records of that kind (default: run and eval)
   --type     only records of this task type
 `;
 
@@ -157,7 +172,9 @@ function reportCommand(args: string[]): number {
     allowPositionals: false,
   });
   const mode = values.mode;
-  if (mode !== undefined && mode !== "run" && mode !== "eval") throw new UsageError(`--mode must be "run" or "eval"`);
+  if (mode !== undefined && mode !== "run" && mode !== "eval" && mode !== "chat") {
+    throw new UsageError(`--mode must be "run", "eval" or "chat"`);
+  }
   const config = loadConfig(values.config ? path.resolve(values.config) : undefined);
   const records = new RunLog(config.runsDir).readAll();
   if (records.length === 0) {
@@ -169,6 +186,89 @@ function reportCommand(args: string[]): number {
   return 0;
 }
 
+const MAX_CLOUD_CALLS_PIPED = 3;
+
+async function chatCommand(args: string[]): Promise<number> {
+  const { values } = parse({
+    args,
+    options: {
+      repo: { type: "string", default: "." },
+      model: { type: "string" },
+      config: { type: "string" },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+  const config = loadConfig(values.config ? path.resolve(values.config) : undefined);
+  const chainIds = config.chains.chat;
+  if (!chainIds) throw new ConfigError(`no "chat" chain in the config: add "chat": ["pc-ollama", "claude"] to "chains"`);
+
+  let root: string;
+  try {
+    root = realpathSync(path.resolve(values.repo));
+  } catch {
+    throw new InputError(`no such folder: ${values.repo}`);
+  }
+  if (!statSync(root).isDirectory()) throw new InputError(`${root} is not a folder`);
+  // The tools can read everything under the folder they are started in, so it must be a project.
+  if (root === realpathSync(homedir())) {
+    throw new InputError(`refusing to chat in ${root}: it is your home directory. cd into a project folder first`);
+  }
+  if (root === path.parse(root).root) throw new InputError(`refusing to chat in ${root}: cd into a project folder first`);
+
+  const local = createBackend(chainIds[0]!, config.backends[chainIds[0]!]!, { model: values.model });
+  if (!(local instanceof OllamaBackend)) {
+    throw new ConfigError(`the "chat" chain must start with an Ollama backend ("${chainIds[0]}" is not one)`);
+  }
+  let cloud: ClaudeCliBackend | null = null;
+  if (chainIds[1] !== undefined) {
+    const second = createBackend(chainIds[1], config.backends[chainIds[1]]!);
+    if (!(second instanceof ClaudeCliBackend)) {
+      throw new ConfigError(`the second backend of the "chat" chain must be the Claude backend ("${chainIds[1]}" is not)`);
+    }
+    cloud = second;
+  }
+
+  process.stderr.write(
+    `orch chat in ${root}\n` +
+      `local model: ${local.model}` +
+      (cloud ? "; harder requests go to Claude (read-only)" : "; no Claude backend is configured") +
+      `\nType /help for commands, /exit to leave.\n`,
+  );
+  const log = new RunLog(config.runsDir);
+  // Ctrl-C leaves the chat. Aborting first stops a command that is running: it is in its own
+  // process group, so it would otherwise outlive the chat.
+  const stop = new AbortController();
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      stop.abort();
+      process.exit(130);
+    });
+  }
+  await runRepl({
+    input: process.stdin,
+    output: process.stdout,
+    errOutput: process.stderr,
+    createSession: (hooks) =>
+      new ChatSession({
+        local,
+        cloud,
+        root,
+        // Asked before every command: the branch can change while the chat is open.
+        onMainBranch: async () => ["main", "master"].includes((await currentBranch(root)) ?? ""),
+        // Outside a repository git's read commands can reach any file, so none is auto-approved.
+        gitRepository: () => isWorkTree(root),
+        agent: config.agent,
+        log,
+        signal: stop.signal,
+        // Piped input is not a person at a keyboard: no unattended runs against the subscription.
+        maxCloudCalls: process.stdin.isTTY ? undefined : MAX_CLOUD_CALLS_PIPED,
+        ...hooks,
+      }),
+  });
+  return 0;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   try {
@@ -176,6 +276,9 @@ export async function main(argv: string[]): Promise<number> {
       process.stdout.write(USAGE);
       return 0;
     }
+    // Like typing `claude`: alone in a terminal, orch opens the chat. Piped, it explains itself.
+    if (command === undefined && process.stdin.isTTY) return await chatCommand([]);
+    if (command === "chat") return await chatCommand(rest);
     if (command === "run") return await runCommand(rest);
     if (command === "eval") return await evalCommand(rest);
     if (command === "report") return reportCommand(rest);

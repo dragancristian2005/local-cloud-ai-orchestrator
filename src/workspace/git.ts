@@ -39,3 +39,22 @@ export async function stagedDiff(repo: string): Promise<{ stat: string; diff: st
   const stat = await git(repo, [...base, "--stat"]);
   return { stat, diff };
 }
+
+/** The branch checked out in a directory, or null outside a repository or on a detached HEAD. */
+export async function currentBranch(dir: string): Promise<string | null> {
+  try {
+    return (await git(dir, ["symbolic-ref", "--short", "-q", "HEAD"])).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the folder is inside a git work tree. */
+export async function isWorkTree(dir: string): Promise<boolean> {
+  try {
+    await git(dir, ["rev-parse", "--is-inside-work-tree"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
