@@ -107,7 +107,11 @@ orch run --type commit-message --repo .
 orch run --type docstring --file src/math.ts --symbol clamp
 orch run --type test-stub --file src/math.ts --symbol clamp
 
-# Run the 12 fixed tasks against the local model, then compare models.
+# Change one function, checked by your own tests. Prints a patch; see "Editing code" below.
+orch run --type small-edit --file src/math.js --symbol clamp \
+  --instruction "throw when lo is greater than hi" --test "npm test"
+
+# Run the 16 fixed tasks against the local model, then compare models.
 orch eval --backend pc-ollama
 orch eval --backend pc-ollama --model <another-model>
 orch report --mode eval
@@ -121,6 +125,62 @@ tier 0 pc-ollama (qwen2.5-coder:7b): pass (1.4s)
 ```
 
 Exit codes: `0` success, `1` every tier failed, `2` bad usage, config or input.
+
+## Editing code (small-edit)
+
+```sh
+orch run --type small-edit --file src/math.js --symbol clamp \
+  --instruction "throw an Error when lo is greater than hi" \
+  --test "npm test" --allow-failing-baseline > change.patch
+git apply change.patch
+```
+
+`orch` shows the model one function and the instruction, puts the answer into a temporary copy
+of your repository (a git worktree in the temp directory, at your last commit), and runs your
+test command there. Only when the tests pass does it print a patch. A failing test run is fed
+back to the model once, then the task goes to the next tier. Your working tree, your index and
+your branch are never changed; applying the patch is one explicit `git apply`.
+
+There are two ways to use it:
+
+- **Keep the tests green.** The tests pass now and must still pass after the edit (a rename, a
+  small refactor). This is the default.
+- **Make a failing test pass.** Write the test first, commit it, and pass
+  `--allow-failing-baseline`. This is the most meaningful check: the edit is accepted only when
+  your new test passes.
+
+| Flag | Meaning |
+|---|---|
+| `--symbol <name>` | The function, method or class to change. `orch` finds its lines (braces for JavaScript and TypeScript, indentation for Python). |
+| `--lines <a>-<b>` | The lines to change, instead of `--symbol`, when that guess is wrong or the file is another language. |
+| `--instruction "<text>"` | What to change. |
+| `--test "<command>"` | Your project's test command. |
+| `--link <path>` | An ignored path the tests need, symlinked into the copy. Usually `node_modules`. Repeatable. |
+| `--allow-failing-baseline` | The tests fail before the edit, and the edit should make them pass. |
+| `--commit` | Also commit the change on a new branch `orch/small-edit-<run id>`. Your current branch does not move. |
+
+The test command and the links can be set once per repository in `config/orchestrator.local.json`,
+keyed by the repository's absolute path:
+
+```json
+{
+  "repos": {
+    "/Users/you/code/app": { "testCommand": "npm test", "linkPaths": ["node_modules"], "testTimeoutMs": 300000 }
+  }
+}
+```
+
+Things to know:
+
+- **The tests run the model's code on your machine, unsandboxed.** That is what "verified by the
+  project's own tests" means. Use small-edit only in repositories you trust, with a test command
+  you would run yourself.
+- The file must be committed and unchanged. The copy is your last commit, so an edit made from it
+  would ignore unsaved work; `orch` refuses instead.
+- The patch is also saved as `runs/<run id>/change.patch`.
+- Ctrl-C stops the tests and removes the temporary copy. If the tests left new files in it, git
+  will not remove it and `orch` prints where it is; nothing is ever forced.
+- A test run is cut off after 5 minutes (`testTimeoutMs`).
 
 ## How a run works
 
@@ -171,8 +231,11 @@ PC, and to Anthropic when Claude answers. Do not stage secrets.
   an API key or reroute the call) is set, so an escalation can never cost money.
 - Claude calls run one at a time, and `orch eval` refuses cloud backends.
 - Ollama is never exposed to the internet.
-- `orch` itself only reads your repositories. In the chat, a file can change only through a
-  command you approved; Claude gets read-only tools and nothing else.
+- `orch` never changes your working tree. In the chat, a file can change only through a
+  command you approved; Claude gets read-only tools and nothing else. small-edit works in a
+  temporary worktree, prints a patch, and commits only with `--commit`, on a new branch.
+- The only thing small-edit runs through a shell is the test command you gave it. A model's
+  answer is only ever written as file content.
 
 ## Development
 

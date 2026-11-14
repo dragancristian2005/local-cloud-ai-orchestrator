@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ConfigError, InputError } from "../src/core/types.ts";
@@ -125,4 +125,26 @@ test("rejects a linkPath that leaves the repository", async () => {
     await assert.rejects(createEditWorkspace({ repoRoot: repo, id: `bad${++counter}`, testCommand: "true", testTimeoutMs: 1000, linkPaths: [bad] }), ConfigError);
   }
   assert.equal(await worktrees(repo), 1);
+});
+
+test("the diff applies whatever the user's diff settings are", async () => {
+  const repo = await makeTempRepo({ "value.js": "export default 1;\n", "check.mjs": CHECK });
+  await commitAll(repo);
+  await gitOut(repo, "config", "diff.noprefix", "true");
+  const ws = await createEditWorkspace({ repoRoot: repo, id: `t${process.pid}-${++counter}`, testCommand: "node check.mjs", testTimeoutMs: 20_000, linkPaths: [] });
+  ws.write("value.js", "export default 2;\n");
+  assert.match(await ws.diff("value.js"), /^diff --git a\/value\.js b\/value\.js\n/);
+  await ws.dispose();
+});
+
+test("write refuses a tracked symlink, which could point anywhere", async () => {
+  const target = path.join(tmpdir(), `orch-link-target-${process.pid}.txt`);
+  writeFileSync(target, "outside\n");
+  const repo = await makeTempRepo({ "value.js": "export default 1;\n" });
+  symlinkSync(target, path.join(repo, "link.js"));
+  await commitAll(repo);
+  const ws = await createEditWorkspace({ repoRoot: repo, id: `t${process.pid}-${++counter}`, testCommand: "true", testTimeoutMs: 1000, linkPaths: [] });
+  assert.throws(() => ws.write("link.js", "x"), InputError);
+  assert.equal(readFileSync(target, "utf8"), "outside\n");
+  await ws.dispose();
 });

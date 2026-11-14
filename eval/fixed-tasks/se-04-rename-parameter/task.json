@@ -1,0 +1,1 @@
+{"taskType": "small-edit", "inputFile": "area.js", "symbol": "area", "instruction": "rename the parameters a and b to width and height", "testCommand": "node --test"}

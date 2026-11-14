@@ -80,3 +80,10 @@ test("runCommand returns at the timeout even when a detached child keeps the out
   assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
   assert.equal(result.timedOut, true);
 });
+
+test("runCommand does not tell the command it is inside a node:test run", async () => {
+  // Inherited, this marker makes a nested `node --test` skip every file and exit 0.
+  assert.ok(process.env.NODE_TEST_CONTEXT, "this test itself runs under node:test");
+  const result = await runCommand(`node -e "console.log(process.env.NODE_TEST_CONTEXT ?? 'unset')"`, { cwd: process.cwd(), timeoutMs: 10_000 });
+  assert.equal(result.output.trim(), "unset");
+});

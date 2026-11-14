@@ -1,0 +1,1 @@
+{"taskType": "small-edit", "inputFile": "greet.js", "symbol": "greet", "instruction": "make the name parameter optional, defaulting to \"world\"", "testCommand": "node --test", "allowFailingBaseline": true}

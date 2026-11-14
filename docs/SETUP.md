@@ -21,6 +21,7 @@ Parts 2 and 3 on the Mac. Allow about 30 minutes, most of it the model download.
 > - Part 3, steps 1–4 against a real model (they were run against a stand-in)
 > - Part 3, step 5: the chat, with a real model that supports tool calling, and its first real
 >   hand-over to Claude with read-only tools
+> - Part 3, step 6: small-edit with a real model (it was run against a stand-in)
 
 ---
 
@@ -271,7 +272,7 @@ orch eval --backend pc-ollama --model <second-model>
 orch report --mode eval
 ```
 
-Each `eval` runs the 12 fixed tasks once, with no retry, and prints which passed. `report` then
+Each `eval` runs the 16 fixed tasks once, with no retry, and prints which passed. `report` then
 shows one row per model:
 
 ```
@@ -331,6 +332,60 @@ shows one row per model. `escalated %` is the share of your messages that ended 
 redid with `/claude`, each count as one failed local attempt. If nearly everything is handed over, or nothing ever is, the model is not
 following the triage: try another one.
 
+### 6. Let it make a failing test pass
+
+small-edit changes one function and accepts the change only when your own tests pass. The clearest
+way to use it is test-first. In a JavaScript project whose tests run with `npm test`:
+
+1. Write a test for the behaviour you want, and check that it fails:
+
+   ```sh
+   npm test
+   ```
+
+2. Commit it. `orch` works from your last commit, and refuses a file with uncommitted changes:
+
+   ```sh
+   git add -A
+   git commit -m "test: clamp rejects an inverted range"
+   ```
+
+3. Ask for the edit. `--allow-failing-baseline` says the tests fail now and should pass afterwards:
+
+   ```sh
+   orch run --type small-edit --file src/math.js --symbol clamp \
+     --instruction "throw an Error when lo is greater than hi" \
+     --test "npm test" --allow-failing-baseline > change.patch
+   ```
+
+   On stderr:
+
+   ```
+   running the tests before any change: npm test
+   the tests fail before the change (allowed)
+   tier 0 pc-ollama (qwen2.5-coder:7b): pass (4.1s)
+   patch saved to /.../runs/20261114-183212-060d43/change.patch
+   apply it with: git apply /.../runs/20261114-183212-060d43/change.patch
+   ```
+
+   If the model's first answer fails your tests, you see `verify fail: tests failed (exit 1): ...`,
+   one retry, and then the hand-over to Claude.
+
+4. Nothing in your project has changed yet (`git status` shows only `change.patch`). Read the
+   patch, apply it, and run the tests yourself:
+
+   ```sh
+   cat change.patch
+   git apply change.patch
+   npm test
+   ```
+
+If your tests need `node_modules`, add `--link node_modules`. With `--commit` instead of the
+redirect, the change is committed on a new branch `orch/small-edit-<run id>` and your current
+branch stays where it is. To avoid typing `--test` every time, see "Editing code" in the README.
+
+The tests run the model's code on your Mac. Use small-edit only in projects you trust.
+
 ---
 
 ## Part 4 — Troubleshooting
@@ -350,5 +405,9 @@ following the triage: try another one.
 | Chat: everything goes to Claude, or nothing does | The model does not follow the one-word triage | Try another model. `orch report --mode chat` shows the share. `/claude` always works. |
 | Chat: `[refused] ...` | The command is on the refuse-list (destructive, or it names a secrets file) | Run it yourself in another terminal if you really mean it. |
 | Chat: `refusing to chat in ... your home directory` | `orch` was started outside a project | `cd` into a project folder first. |
+| small-edit: `the test command fails before any change` | Your tests already fail at the last commit | Fix them first. If the failing test is the point (you wrote it for this edit), add `--allow-failing-baseline`. |
+| small-edit: `... has uncommitted changes` | The file differs from your last commit | Commit or stash the change. `orch` edits a copy of the last commit and would otherwise ignore it. |
+| small-edit: `could not find the end of ...` | `--symbol` could not tell where the function ends | Pass the lines yourself: `--lines 12-30` instead of `--symbol`. |
+| small-edit: `the temporary worktree was kept at ...` | Your tests wrote new files into the copy, and git will not remove it unforced | Look at the folder, then `git worktree remove --force <path>` yourself. |
 | `orch: command not found` | `npm link` was not run | Run `npm link` in the project folder, or use `npm run orch -- <args>`. |
 | `nothing staged` | No staged changes for a commit message | `git add` something first. |

@@ -1,0 +1,1 @@
+{"taskType": "small-edit", "inputFile": "average.js", "symbol": "average", "instruction": "return 0 for an empty array instead of NaN", "testCommand": "node --test", "allowFailingBaseline": true}

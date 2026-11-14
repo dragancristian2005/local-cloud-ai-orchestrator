@@ -1,0 +1,1 @@
+{"taskType": "small-edit", "inputFile": "range.js", "symbol": "range", "instruction": "include end in the result", "testCommand": "node --test", "allowFailingBaseline": true}

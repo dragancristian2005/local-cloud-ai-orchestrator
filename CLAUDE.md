@@ -101,7 +101,7 @@ Log record (one JSON line per attempt):
 1. **M1 (weekend 1):** `orch run --type commit-message --repo .` -> builds prompt from `git diff --staged`, sends to Ollama, verifies format (non-empty, subject <= 72 chars, imperative-ish), prints result, writes a log line. No Claude yet.
 2. **M2:** `claude-cli` backend, health check + timeout fallback, escalation on verify failure, `docstring` and `test-stub` task types.
 3. **M3:** `orch eval --backend pc-ollama` runs the fixed task set; `orch report` prints pass rate / escalation rate / avg time per model from the logs.
-4. **M4 (only if M1–M3 are fun):** code-changing tasks (`small-edit`) verified by the project's own test command on a throwaway branch.
+4. **M4 (built):** code-changing tasks (`small-edit`) verified by the project's own test command in a throwaway git worktree. Plan: `docs/superpowers/plans/2026-11-12-small-edit.md`.
 
 5. **M5:** the chat. `orch` opens a conversation in the current repository; a router sends each message to the local model (agent loop with read, search and approved commands) or to Claude (headless, read-only tools). Plan: `docs/superpowers/plans/2026-11-12-chat-agent.md`.
 
@@ -116,12 +116,15 @@ Multi-backend adapters for other CLIs, a web UI, benchmarks like SWE-bench (too 
 - **Prompt budget:** 6000 tokens (estimated pessimistically as chars / 3), with `num_ctx` 8192 sent to Ollama. A prompt that fills `num_ctx` is treated as truncated and logged as `backend_error`.
 - **Retries:** decided by `decideNext` in `src/core/policy.ts`. The run loop never retries more than `retryBeforeEscalate` times, whatever the policy says.
 - **Log record:** the fields above plus `attempt`, `mode` (`run` | `eval`) and `taskId`. Raw outputs are `runs/<runId>/tier<N>-attempt<M>.txt`. For an attempt that produced no output (unreachable, timeout, backend error), `verifyDetail` holds the error message.
-- **Verifier rules:** in each file under `src/tasks/`. The shell-command verifier arrives with M4.
+- **Verifier rules:** in each file under `src/tasks/`. A verifier may be async. The shell-command verifier is `runCommand` in `src/core/command.ts` (re-exported by `src/core/verifier.ts`); it is the only place a shell is used.
+- **small-edit (M4):** the model returns the new version of one marked region (`--symbol` or `--lines`), never a diff; `src/tasks/region.ts` finds and splices it. The flow is `src/core/small-edit-run.ts`: a detached `git worktree` in the temp directory (`src/workspace/edit-workspace.ts`), the user's test command there before any model call and after every answer, then a patch on stdout. In the user's repository `orch` runs only read-only git queries, `git worktree add --detach` and `git worktree remove` (never `--force`). `--commit` commits the one file on a new branch `orch/small-edit-<runId>` from inside the worktree. Model output is only ever file content: never part of a command or a path. The test command comes from `--test` or `repos` in the config, runs the model's code unsandboxed, and is cut off after 5 minutes.
+- **Eval set:** 16 fixed tasks; the 4 `se-*` tasks are small-edits, each with a tiny `project/` that `runEval` copies and commits in the temp directory.
 - **Claude flags:** `docs/claude-cli-flags.md`. Never `--bare` (it ignores the subscription login). The Claude backend refuses to run while `ANTHROPIC_API_KEY` or a similar billing/gateway variable is set; it checks names only.
+- **Commands never inherit `NODE_TEST_CONTEXT`:** with it, a `node --test` test command started under our own test run skips every file and exits 0.
 - **Agent harness:** the loop in `src/agent/loop.ts` is generic. It receives a toolkit (`src/agent/toolkit.ts`): tools, a system prompt, and one policy that answers allow, ask or deny for every tool call; a tool the policy does not know is asked. The coding tools and rules are one toolkit (`src/agent/coding-toolkit.ts`). A second toolkit, or a separate package, waits until a second harness exists.
 
 ## Working on this repo
 - `npm test` runs everything with a fake Ollama server and a fake `claude` binary; it needs neither the PC nor the real CLI. `npm run typecheck` runs `tsc --noEmit`.
 - Tests come first: write the failing test, then the code.
-- The plan for M1-M3 is `docs/superpowers/plans/2026-11-12-tiered-orchestrator.md`. M4 gets its own plan.
+- The plan for M1-M3 is `docs/superpowers/plans/2026-11-12-tiered-orchestrator.md`. The plan for M4 is `docs/superpowers/plans/2026-11-12-small-edit.md`.
 - **Security review before every pull request, not per commit.** The `security-guidance` plugin's per-commit and end-of-turn reviews are off (`env` in `.claude/settings.json`); its free pattern warnings stay on. Before opening a pull request, run `/security-review` on the branch. If it reports anything, record it with `node .claude/scripts/security-review.ts record findings --report <file>`, then stop and tell the user: fixes are discussed with them first. If it reports nothing, record `clean` the same way. A hook blocks any pull request whose commit has no clean review recorded.

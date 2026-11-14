@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -132,11 +132,14 @@ export async function createEditWorkspace(opts: {
     write(file, content) {
       const full = inside(file);
       if (full === "") throw new InputError(`${file} is inside a linked directory and cannot be edited`);
+      // A symlink would be followed, and may point outside the worktree.
+      if (lstatSync(full, { throwIfNoEntry: false })?.isSymbolicLink()) throw new InputError(`${file} is a symbolic link and cannot be edited`);
       if (!originals.has(full)) originals.set(full, existsSync(full) ? readFileSync(full, "utf8") : null);
       writeFileSync(full, content);
     },
     test: () => runCommand(opts.testCommand, { cwd: dir, timeoutMs: opts.testTimeoutMs, signal: opts.signal }),
-    diff: (file) => git(dir, ["diff", "--no-color", "--no-ext-diff", "--", file]),
+    // Fixed prefixes: the patch must apply with a plain `git apply` whatever diff.noprefix says.
+    diff: (file) => git(dir, ["diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--", file]),
     async commit(file, branch, message) {
       try {
         await git(dir, ["switch", "-c", branch]);

@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadFixedTasks, runEval } from "../eval/compare.ts";
 import type { FixedTask } from "../eval/compare.ts";
 import { PROJECT_ROOT } from "../src/core/config.ts";
-import { BackendError } from "../src/core/types.ts";
+import { runCommand } from "../src/core/command.ts";
+import { BackendError, ConfigError } from "../src/core/types.ts";
 import { RunLog } from "../src/log/run-log.ts";
 import { taskModules } from "../src/tasks/task.ts";
 import { fakeBackend } from "./helpers/fake-backend.ts";
@@ -28,15 +29,21 @@ function newLog(): RunLog {
   return new RunLog(path.join(mkdtempSync(path.join(tmpdir(), "orch-eval-")), "runs"));
 }
 
-test("the fixed task set has 12 well-formed tasks", () => {
+test("the fixed task set has 16 well-formed tasks", () => {
   const tasks = loadFixedTasks(FIXED_DIR);
-  assert.equal(tasks.length, 12);
-  assert.equal(new Set(tasks.map((task) => task.id)).size, 12);
+  assert.equal(tasks.length, 16);
+  assert.equal(new Set(tasks.map((task) => task.id)).size, 16);
   assert.deepEqual(tasks.map((task) => task.id), tasks.map((task) => task.id).toSorted());
   for (const task of tasks) {
     const module = taskModules[task.taskType];
     assert.ok(module, `${task.id}: unknown task type ${task.taskType}`);
     assert.ok(task.input.text.length > 0, `${task.id}: empty input`);
+    if (task.taskType === "small-edit") {
+      assert.ok(task.projectDir && existsSync(path.join(task.projectDir, task.input.filePath!)), `${task.id}: project file`);
+      assert.ok(task.testCommand, `${task.id}: test command`);
+      assert.ok(task.input.instruction, `${task.id}: instruction`);
+      continue;
+    }
     const prepared = module.prepare(task.input, 6000);
     assert.ok(prepared.prompt.length > task.input.text.length, task.id);
   }
@@ -44,6 +51,49 @@ test("the fixed task set has 12 well-formed tasks", () => {
   assert.equal(count("commit-message"), 5);
   assert.equal(count("docstring"), 4);
   assert.equal(count("test-stub"), 3);
+  assert.equal(count("small-edit"), 4);
+});
+
+const smallEditTasks = () => loadFixedTasks(FIXED_DIR).filter((task) => task.taskType === "small-edit");
+const GREET = 'export function greet(name = "world") {\n  return `Hello, ${name}!`;\n}';
+
+test("each small-edit fixture behaves as declared at HEAD", async () => {
+  for (const task of smallEditTasks()) {
+    const copy = mkdtempSync(path.join(tmpdir(), "orch-fixture-"));
+    cpSync(task.projectDir!, copy, { recursive: true });
+    const result = await runCommand(task.testCommand!, { cwd: copy, timeoutMs: 30_000 });
+    assert.equal(result.ok, task.allowFailingBaseline !== true, `${task.id}:\n${result.output}`);
+  }
+  assert.deepEqual(smallEditTasks().map((task) => task.allowFailingBaseline === true), [true, true, true, false]);
+});
+
+test("runEval runs a small-edit task through the worktree", async () => {
+  const log = newLog();
+  const backend = fakeBackend({ id: "pc", replies: [GREET] });
+  const results = await runEval({ backend, tasks: smallEditTasks().slice(0, 1), budgetTokens: 6000, log });
+  assert.deepEqual(results.map((r) => [r.id, r.ok, r.reason]), [["se-01-default-parameter", true, null]]);
+  const records = log.readAll();
+  assert.equal(records.length, 1);
+  assert.deepEqual([records[0]!.mode, records[0]!.taskType, records[0]!.taskId, records[0]!.verify], ["eval", "small-edit", "se-01-default-parameter", "pass"]);
+  assert.ok(backend.prompts[0]!.includes("<<<EDIT START>>>\nexport function greet(name) {"));
+  // The fixture in the project is never edited.
+  assert.ok(readFileSync(path.join(FIXED_DIR, "se-01-default-parameter/project/greet.js"), "utf8").includes("greet(name) {"));
+});
+
+test("runEval scores a wrong edit as verify_failed", async () => {
+  const log = newLog();
+  const backend = fakeBackend({ id: "pc", replies: ["export function greet(name) {\n  return `Hello, ${name}!`; // unchanged behaviour\n}", GREET] });
+  const results = await runEval({ backend, tasks: smallEditTasks().slice(0, 1), budgetTokens: 6000, log });
+  assert.deepEqual(results.map((r) => [r.ok, r.reason]), [[false, "verify_failed"]]);
+  assert.match(log.readAll()[0]!.verifyDetail, /^tests failed/);
+  assert.equal(backend.prompts.length, 1, "no retry in eval");
+});
+
+test("runEval reports a broken small-edit fixture as a config problem", async () => {
+  const task = { ...smallEditTasks()[3]!, id: "se-broken", testCommand: `node -e "process.exit(1)"` };
+  const backend = fakeBackend({ id: "pc", replies: [GREET] });
+  await assert.rejects(runEval({ backend, tasks: [task], budgetTokens: 6000, log: newLog() }), (err: unknown) => err instanceof ConfigError && /se-broken/.test(err.message));
+  assert.equal(backend.prompts.length, 0);
 });
 
 test("runEval logs one eval record per task", async () => {
@@ -120,11 +170,12 @@ test("orch eval runs the fixed set and prints a table", async () => {
     const result = await runCli(["eval", "--backend", "pc-ollama", "--config", configPath, "--model", "falcon:7b"]);
     assert.equal(result.code, 0, result.stderr);
     // The same JSDoc answer is right for the three TypeScript docstring tasks and wrong for everything else.
-    assert.match(result.stdout, /^3\/12 passed$/m);
+    assert.match(result.stdout, /^3\/16 passed$/m);
+    assert.match(result.stdout, /^se-01-default-parameter\s+verify_failed\s+\d+$/m);
     assert.match(result.stdout, /^ds-01-ts-pure-function\s+pass\s+\d+$/m);
     assert.match(result.stdout, /^ds-04-py-function\s+verify_failed\s+\d+$/m);
     const lines = readFileSync(path.join(runsDir, "log.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
-    assert.equal(lines.length, 12);
+    assert.equal(lines.length, 16);
     assert.ok(lines.every((line) => line.mode === "eval" && line.model === "falcon:7b" && line.attempt === 0));
   } finally {
     await server.close();
@@ -139,6 +190,8 @@ test("orch eval --type runs only that task type", async () => {
     const { configPath } = writeTempConfig(ollamaOnlyConfig(server.url));
     const result = await runCli(["eval", "--backend", "pc-ollama", "--type", "docstring", "--config", configPath]);
     assert.match(result.stdout, /^3\/4 passed$/m);
+    const edits = await runCli(["eval", "--backend", "pc-ollama", "--type", "small-edit", "--config", configPath]);
+    assert.match(edits.stdout, /^0\/4 passed$/m);
   } finally {
     await server.close();
   }

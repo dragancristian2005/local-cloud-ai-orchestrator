@@ -31,7 +31,10 @@ export function runCommand(
     // Its own process group, so a timeout takes the children with it and not only the shell.
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, { shell: true, cwd: opts.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+      // Without the marker of an enclosing node:test run: with it, a `node --test` command would
+      // skip every test file and report success.
+      const { NODE_TEST_CONTEXT: _nested, ...env } = process.env;
+      child = spawn(command, { shell: true, cwd: opts.cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     } catch (err) {
       // For example a NUL byte in the command line.
       const message = err instanceof Error ? err.message : String(err);
