@@ -74,6 +74,10 @@ export interface TaskInput {
   stat?: string;
   filePath?: string;
   symbol?: string;
+  /** small-edit: what to change. */
+  instruction?: string;
+  /** small-edit: the lines to change, 0-based and inclusive. */
+  region?: { start: number; end: number };
 }
 
 export interface PreparedTask {

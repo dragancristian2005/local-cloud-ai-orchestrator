@@ -69,5 +69,5 @@ test("prepare needs a file and a symbol", () => {
 });
 
 test("the registry knows docstring and test-stub", () => {
-  assert.deepEqual(Object.keys(taskModules).sort(), ["commit-message", "docstring", "test-stub"]);
+  assert.deepEqual(Object.keys(taskModules).sort(), ["commit-message", "docstring", "small-edit", "test-stub"]);
 });
